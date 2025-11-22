@@ -1,0 +1,19 @@
+{
+  "name": "bugbot",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "dev": "npm run dev --workspaces",
+    "bugbot": "npm run build && node packages/api/dist/cli.js",
+    "bugbot:dev": "tsx --tsconfig packages/api/tsconfig.json packages/api/src/cli.ts"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/node": "^20.10.6"
+  }
+}
+

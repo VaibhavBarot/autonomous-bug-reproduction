@@ -1,0 +1,27 @@
+{
+  "name": "@bugbot/api",
+  "version": "1.0.0",
+  "bin": {
+    "bugbot": "./dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "commander": "^11.1.0",
+    "chalk": "^4.1.2",
+    "fs-extra": "^11.2.0",
+    "@bugbot/agent": "*",
+    "@bugbot/runner": "*",
+    "axios": "^1.6.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3",
+    "@types/fs-extra": "^11.0.4"
+  }
+}
+

@@ -1,0 +1,19 @@
+{
+  "name": "@bugbot/agent",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/agent.ts"
+  },
+  "dependencies": {
+    "openai": "^4.20.1",
+    "chalk": "^4.1.2"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
+
