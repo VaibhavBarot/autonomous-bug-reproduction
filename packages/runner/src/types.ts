@@ -21,6 +21,7 @@ export interface BrowserState {
   title: string;
   consoleErrors: string[];
   networkEntries: NetworkEntry[];
+  backendLogs: string[];
 }
 
 export interface ClickAction {

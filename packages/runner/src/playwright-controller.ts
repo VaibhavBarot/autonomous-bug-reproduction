@@ -3,6 +3,7 @@ import { DOMElement, NetworkEntry, BrowserState } from './types';
 import { extractSimplifiedDOM } from './dom-simplifier';
 import * as fs from 'fs';
 import * as path from 'path';
+import CDP from 'chrome-remote-interface';
 
 export class PlaywrightController {
   private browser: Browser | null = null;
@@ -11,6 +12,8 @@ export class PlaywrightController {
   private networkEntries: NetworkEntry[] = [];
   private consoleErrors: string[] = [];
   private tracingPath: string | null = null;
+  private backendLogs: string[] = [];
+  private cdpClient: any = null;
 
   async initialize(headless: boolean = false): Promise<void> {
     try {
@@ -77,6 +80,30 @@ export class PlaywrightController {
       screenshots: true,
       snapshots: true
     });
+
+    // Start backend error/log monitoring
+    this.monitorBackendLogs();
+  }
+  /**
+   * Connects to Node.js inspector and listens for console/error events.
+   */
+  async monitorBackendLogs(): Promise<void> {
+    try {
+      this.cdpClient = await CDP({ port: 9229 });
+      const { Runtime } = this.cdpClient;
+      await Runtime.enable();
+      Runtime.consoleAPICalled((payload: { type: string; args: Array<{ value: any }>; }) => {
+        if (payload.type === 'error' || payload.type === 'warning' || payload.type === 'log') {
+          const logMsg = payload.args.map((a: { value: any }) => a.value).join(' ');
+          this.backendLogs.push(`[${payload.type}] ${logMsg}`);
+        }
+      });
+      Runtime.exceptionThrown((payload: { exceptionDetails: { text: string } }) => {
+        this.backendLogs.push(`[exception] ${payload.exceptionDetails.text}`);
+      });
+    } catch (err) {
+      this.backendLogs.push(`[monitor error] ${err}`);
+    }
   }
 
   async navigate(url: string): Promise<void> {
@@ -164,12 +191,12 @@ export class PlaywrightController {
 
   async getState(): Promise<BrowserState> {
     if (!this.page) throw new Error('Browser not initialized');
-    
     return {
       url: this.page.url(),
       title: await this.page.title(),
       consoleErrors: [...this.consoleErrors],
-      networkEntries: this.networkEntries.slice(-50) // Last 50 entries
+      networkEntries: this.networkEntries.slice(-50), // Last 50 entries
+      backendLogs: this.backendLogs.slice(-50) // Last 50 backend logs
     };
   }
 
