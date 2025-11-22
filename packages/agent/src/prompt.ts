@@ -17,7 +17,7 @@ export function buildPrompt(
     .join('\n');
 
   const consoleErrors = currentObservation.state.consoleErrors.length > 0
-    ? `\nConsole Errors:\n${currentObservation.state.consoleErrors.slice(-5).map(e => `- ${e}`).join('\n')}`
+    ? `\nConsole Errors:\n${currentObservation.state.consoleErrors.slice(-5).map((e: string) => `- ${e}`).join('\n')}`
     : '\nConsole Errors: None';
 
   return `You are a UI testing agent. Your goal is to reproduce the following bug:
@@ -50,20 +50,24 @@ Available Actions:
 
 Response Format (JSON only, no markdown):
 {
-  "thought": "Brief explanation of what you're trying to do",
+  "thought": "Analysis of current state. If you have performed the action and the observed behavior matches the bug description (e.g., error appeared, nothing happened, wrong state), set status to 'reproduced'.",
   "action": {
-    "type": "click|input|wait|navigate",
+    "type": "click" | "input" | "wait" | "navigate",
     "selector": "selector from available elements",
     "target": "human-readable description of target",
     "text": "text to input (only for input action)",
     "url": "url to navigate to (only for navigate action)"
   },
-  "status": "in_progress|reproduced|failed",
-  "reason": "explanation if status is reproduced or failed"
+  "status": "in_progress" | "reproduced" | "failed",
+  "reason": "REQUIRED if status is reproduced: Explain exactly what happened and how it matches the bug description"
 }
 
-If you believe the bug has been reproduced (e.g., cart count didn't increase when item was added), set status to "reproduced" and explain why in the reason field.
-
-Return ONLY valid JSON, no other text.`;
+CRITICAL INSTRUCTIONS:
+1. CHECK HISTORY: Review 'Recent Actions Taken'. If you have already performed the action that is supposed to trigger the bug, check the current state.
+2. MATCH BUG: Does the current state match the BUG DESCRIPTION?
+   - If the bug is "X does not happen", and you did the action and X didn't happen -> REPRODUCED.
+   - If the bug is "Error Y appears", and you see Error Y -> REPRODUCED.
+3. STOP LOOPING: Do not repeat the same action more than twice if the state isn't changing. If the expected happy path isn't working, that IS the bug.
+4. DETECT FAILURE: If an action produces no visible change when it should, that confirms the bug. Mark as 'reproduced'.`;
 }
 

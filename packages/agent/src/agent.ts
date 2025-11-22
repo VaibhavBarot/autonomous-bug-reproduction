@@ -17,7 +17,7 @@ export class BugReproductionAgent {
     
     // Set default model based on provider
     if (!model) {
-      this.model = provider === 'gemini' ? 'gemini-2.0-flash-exp' : 'gpt-4-turbo-preview';
+      this.model = provider === 'gemini' ? 'gemini-2.0-flash-thinking-exp-01-21' : 'gpt-4-turbo-preview';
     } else {
       this.model = model;
     }
