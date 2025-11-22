@@ -121,49 +121,167 @@ export class PlaywrightController {
     
     // Clean up selector - handle "or" patterns and extract text
     let cleanSelector = selector.trim();
+    const originalSelector = selector;
     
-    // Handle selectors like "button or text="Add to Cart""
+    // Handle selectors like "button or text="Add to Cart"" or 'button or text="Add to Cart"'
     if (cleanSelector.includes(' or ')) {
-      // Extract the text part
-      const textMatch = cleanSelector.match(/text=["']([^"']+)["']/);
-      if (textMatch) {
-        cleanSelector = textMatch[1];
+      // Split by " or " and take the last part
+      const parts = cleanSelector.split(/\s+or\s+/);
+      if (parts.length >= 2) {
+        let lastPart = parts[parts.length - 1].trim();
+        console.error(`[Click] Last part before cleaning: "${lastPart}"`);
+        
+        // Remove outer quotes if present
+        lastPart = lastPart.replace(/^["']|["']$/g, '');
+        
+        // If it starts with text=, extract everything after text=" or text='
+        if (lastPart.startsWith('text=')) {
+          // Remove text= prefix
+          let textValue = lastPart.replace(/^text\s*=\s*/, '');
+          // Remove quotes around the value
+          textValue = textValue.replace(/^["']|["']$/g, '');
+          cleanSelector = textValue;
+          console.error(`[Click] Extracted from text= pattern: "${cleanSelector}"`);
+        } else {
+          // Use the last part as-is (should be the text)
+          cleanSelector = lastPart;
+          console.error(`[Click] Using last part after "or": "${cleanSelector}"`);
+        }
       } else {
-        // Extract button part
-        const buttonMatch = cleanSelector.match(/(button|a|input)/);
-        if (buttonMatch) {
-          cleanSelector = cleanSelector.split(' or ')[0].trim();
+        // Fallback: try to extract text="..." pattern directly
+        const textMatch = cleanSelector.match(/text\s*=\s*["']([^"']+)["']/);
+        if (textMatch && textMatch[1]) {
+          cleanSelector = textMatch[1];
+          console.error(`[Click] Extracted text from text= pattern: "${cleanSelector}"`);
+        } else {
+          // Try to find any quoted text
+          const quotedMatch = cleanSelector.match(/["']([^"']+)["']/);
+          if (quotedMatch && quotedMatch[1]) {
+            cleanSelector = quotedMatch[1];
+            console.error(`[Click] Extracted quoted text: "${cleanSelector}"`);
+          }
         }
       }
     }
     
+    console.error(`[Click] Original selector: "${originalSelector}"`);
+    console.error(`[Click] Cleaned selector (after first pass): "${cleanSelector}"`);
+    
+    // Final safety check: if cleaned selector still contains " or " or looks like a complex selector,
+    // try to extract just the text part more aggressively
+    if (cleanSelector.includes(' or ') || cleanSelector.includes('text=') || (cleanSelector.includes('=') && !cleanSelector.startsWith('#'))) {
+      console.error(`[Click] Selector still contains problematic patterns, attempting aggressive extraction...`);
+      
+      // Try to extract text from text="..." pattern more aggressively
+      const aggressiveMatch = cleanSelector.match(/text\s*=\s*["']([^"']+)["']/);
+      if (aggressiveMatch && aggressiveMatch[1]) {
+        cleanSelector = aggressiveMatch[1];
+        console.error(`[Click] Aggressive extraction from text=: "${cleanSelector}"`);
+      } else {
+        // Try to find any quoted text that looks like button text
+        const quotedParts = cleanSelector.match(/["']([A-Za-z0-9\s]+)["']/g);
+        if (quotedParts && quotedParts.length > 0) {
+          // Take the longest quoted text (likely the button text)
+          const longest = quotedParts.reduce((a, b) => a.length > b.length ? a : b);
+          cleanSelector = longest.replace(/["']/g, '');
+          console.error(`[Click] Using longest quoted text: "${cleanSelector}"`);
+        } else {
+          // Last resort: extract text after "or" or after "="
+          const afterOr = cleanSelector.split(/\s+or\s+/).pop() || '';
+          const afterEquals = cleanSelector.split('=').pop() || '';
+          // Take whichever is longer and looks more like button text
+          const candidate1 = afterOr.replace(/^["']|["']$/g, '').trim();
+          const candidate2 = afterEquals.replace(/^["']|["']$/g, '').trim();
+          cleanSelector = candidate1.length > candidate2.length ? candidate1 : candidate2;
+          console.error(`[Click] Using text after "or" or "=": "${cleanSelector}"`);
+        }
+      }
+    }
+    
+    console.error(`[Click] Final cleaned selector: "${cleanSelector}"`);
+    
     try {
-      // Try different selector strategies
-      if (cleanSelector.startsWith('text=')) {
-        const text = cleanSelector.replace('text=', '').replace(/"/g, '').replace(/'/g, '');
-        await this.page.getByText(text).first().click();
-      } else if (cleanSelector.includes('getByRole')) {
-        // Extract role and name from selector like "getByRole('button', { name: 'Add' })"
+      // Try different selector strategies in order of preference
+      
+      // 1. If it's just plain text (no special characters), use getByText
+      if (!cleanSelector.includes('[') && 
+          !cleanSelector.includes('(') && 
+          !cleanSelector.startsWith('.') && 
+          !cleanSelector.startsWith('#') && 
+          !cleanSelector.startsWith('text=') &&
+          !cleanSelector.includes('getByRole') &&
+          !cleanSelector.includes(' or ') &&
+          !cleanSelector.includes('=')) {
+        console.error(`[Click] Using getByText with: "${cleanSelector}"`);
+        await this.page.getByText(cleanSelector, { exact: false }).first().click();
+      }
+      // 2. If it starts with text=, extract and use getByText
+      else if (cleanSelector.startsWith('text=')) {
+        const text = cleanSelector.replace('text=', '').replace(/"/g, '').replace(/'/g, '').trim();
+        console.error(`[Click] Using getByText (from text=): "${text}"`);
+        await this.page.getByText(text, { exact: false }).first().click();
+      }
+      // 3. If it's quoted text, extract and use getByText
+      else if (cleanSelector.match(/^["']([^"']+)["']$/)) {
+        const text = cleanSelector.replace(/["']/g, '');
+        console.error(`[Click] Using getByText (from quotes): "${text}"`);
+        await this.page.getByText(text, { exact: false }).first().click();
+      }
+      // 4. If it contains getByRole, parse it
+      else if (cleanSelector.includes('getByRole')) {
         const match = cleanSelector.match(/getByRole\(['"]([^'"]+)['"],\s*\{\s*name:\s*['"]([^'"]+)['"]\s*\}\)/);
         if (match) {
+          console.error(`[Click] Using getByRole: role="${match[1]}", name="${match[2]}"`);
           await this.page.getByRole(match[1] as any, { name: match[2] }).click();
         } else {
-          await this.page.locator(cleanSelector).click();
+          console.error(`[Click] Using locator (getByRole fallback): "${cleanSelector}"`);
+          await this.page.locator(cleanSelector).first().click();
         }
-      } else if (cleanSelector.match(/^["']([^"']+)["']$/)) {
-        // If selector is just quoted text, use getByText
-        const text = cleanSelector.replace(/["']/g, '');
-        await this.page.getByText(text).first().click();
-      } else if (!cleanSelector.includes('[') && !cleanSelector.includes('(') && !cleanSelector.startsWith('.') && !cleanSelector.startsWith('#') && !cleanSelector.includes(' ')) {
-        // If it looks like plain text (no CSS selectors), try getByText
-        await this.page.getByText(cleanSelector).first().click();
-      } else {
-        // Use as CSS selector
+      }
+      // 5. If selector still contains problematic patterns, try getByText as fallback
+      else if (cleanSelector.includes(' or ') || cleanSelector.includes('text=') || cleanSelector.includes('=')) {
+        // Last resort: try to extract any text that looks like button text
+        // First try to find quoted text
+        let textMatch = cleanSelector.match(/["']([A-Za-z0-9\s]+)["']/);
+        if (!textMatch) {
+          // Try without quotes - look for text after = or after "or"
+          textMatch = cleanSelector.match(/=\s*["']?([A-Za-z][A-Za-z0-9\s]{2,})["']?/) || 
+                     cleanSelector.match(/or\s+["']?([A-Za-z][A-Za-z0-9\s]{2,})["']?/);
+        }
+        if (textMatch && textMatch[1]) {
+          const fallbackText = textMatch[1].trim();
+          console.error(`[Click] Fallback: Using getByText with extracted text: "${fallbackText}"`);
+          await this.page.getByText(fallbackText, { exact: false }).first().click();
+        } else {
+          // Ultimate fallback: try to use getByRole with button
+          console.error(`[Click] Ultimate fallback: Trying getByRole('button') with text matching`);
+          // Extract any alphanumeric text from the selector
+          const anyText = cleanSelector.match(/([A-Za-z][A-Za-z0-9\s]{3,})/);
+          if (anyText && anyText[1]) {
+            const buttonText = anyText[1].trim();
+            console.error(`[Click] Trying getByRole('button', { name: "${buttonText}" })`);
+            await this.page.getByRole('button', { name: buttonText, exact: false }).first().click();
+          } else {
+            throw new Error(`Cannot parse selector: "${originalSelector}" (cleaned: "${cleanSelector}"). Please use a simpler selector format.`);
+          }
+        }
+      }
+      // 6. Default: use as CSS selector with locator - BUT ONLY if it's a valid CSS selector
+      else {
+        // Check if it looks like a valid CSS selector before using locator
+        if (cleanSelector.includes('=') || cleanSelector.includes(' or ')) {
+          // This shouldn't happen, but if it does, throw an error
+          throw new Error(`Invalid selector format: "${originalSelector}". Cannot use as CSS selector.`);
+        }
+        console.error(`[Click] Using locator (CSS selector): "${cleanSelector}"`);
         await this.page.locator(cleanSelector).first().click();
       }
+      
       await this.page.waitForTimeout(500); // Wait for UI to update
+      console.error(`[Click] Successfully clicked: "${cleanSelector}"`);
     } catch (error: any) {
-      throw new Error(`Failed to click selector "${selector}" (cleaned: "${cleanSelector}"): ${error.message}`);
+      console.error(`[Click] Error details:`, error);
+      throw new Error(`Failed to click selector "${originalSelector}" (cleaned: "${cleanSelector}"): ${error.message}`);
     }
   }
 

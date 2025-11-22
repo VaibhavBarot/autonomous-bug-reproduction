@@ -7,6 +7,51 @@ import * as path from 'path';
 import * as fs from 'fs-extra';
 import chalk from 'chalk';
 
+// Add axios interceptors for REST API debugging
+if (process.env.DEBUG_API || process.env.VERBOSE) {
+  axios.interceptors.request.use((config) => {
+    console.log(chalk.cyan(`\n📤 API REQUEST: ${config.method?.toUpperCase()} ${config.url}`));
+    if (config.data && Object.keys(config.data).length > 0) {
+      console.log(chalk.gray(`   Body: ${JSON.stringify(config.data, null, 2)}`));
+    }
+    if (config.params && Object.keys(config.params).length > 0) {
+      console.log(chalk.gray(`   Params: ${JSON.stringify(config.params, null, 2)}`));
+    }
+    return config;
+  });
+
+  axios.interceptors.response.use(
+    (response) => {
+      const dataPreview = typeof response.data === 'object' 
+        ? JSON.stringify(response.data).substring(0, 200)
+        : String(response.data).substring(0, 200);
+      
+      console.log(chalk.green(`📥 API RESPONSE: ${response.status} ${response.config.method?.toUpperCase()} ${response.config.url}`));
+      
+      if (response.config.url?.includes('/dom')) {
+        console.log(chalk.gray(`   DOM elements: ${Array.isArray(response.data) ? response.data.length : 'N/A'}`));
+      } else if (response.config.url?.includes('/state')) {
+        console.log(chalk.gray(`   URL: ${response.data.url || 'N/A'}`));
+        console.log(chalk.gray(`   Console errors: ${response.data.consoleErrors?.length || 0}`));
+      } else if (response.config.url?.includes('/network')) {
+        console.log(chalk.gray(`   Network entries: ${Array.isArray(response.data) ? response.data.length : 'N/A'}`));
+      } else {
+        console.log(chalk.gray(`   Response: ${dataPreview}${dataPreview.length >= 200 ? '...' : ''}`));
+      }
+      return response;
+    },
+    (error) => {
+      console.error(chalk.red(`❌ API ERROR: ${error.config?.method?.toUpperCase()} ${error.config?.url}`));
+      console.error(chalk.red(`   Status: ${error.response?.status || 'No response'}`));
+      console.error(chalk.red(`   Error: ${error.response?.data?.error || error.message}`));
+      if (error.response?.data?.stack && process.env.DEBUG_API) {
+        console.error(chalk.red(`   Stack: ${error.response.data.stack}`));
+      }
+      return Promise.reject(error);
+    }
+  );
+}
+
 export interface OrchestratorConfig {
   runnerUrl: string;
   targetUrl: string;
@@ -116,6 +161,28 @@ export class Orchestrator {
           console.log(chalk.yellow(`\n🤔 Consulting LLM agent...`));
         }
         
+        // SAFETY CHECK: Detect repetitive loops
+        // If the last 2 actions were identical clicks, and we are about to ask again,
+        // we can assume the agent is stuck loop.
+        const lastActions = this.history.actions.slice(-2);
+        if (lastActions.length === 2 && 
+            lastActions[0].type === 'click' && 
+            lastActions[1].type === 'click' &&
+            lastActions[0].selector === lastActions[1].selector) {
+            
+            console.log(chalk.yellow.bold(`\n⚠️  Loop detected: Agent keeps clicking '${lastActions[0].selector}'`));
+            console.log(chalk.green.bold(`🎉  Assuming bug is reproduced (action has no effect).`));
+            
+            status = 'reproduced';
+            steps.push({
+              stepNumber,
+              action: { type: 'wait', selector: 'body' }, // Dummy action to close loop
+              observation,
+              thought: 'Loop detected: The agent kept clicking the same button with no result. This confirms the bug (action produces no change).'
+            });
+            break;
+        }
+
         const agentResponse = await this.agent.decideNextAction(
           this.config.bugDescription,
           observation,
@@ -164,9 +231,18 @@ export class Orchestrator {
           }
         } catch (error: any) {
           console.error(chalk.red(`❌ Error executing action: ${error.message}`));
-          if (this.config.verbose) {
+          if (this.config.verbose || process.env.DEBUG_API) {
             console.error(chalk.red(`   Action: ${agentResponse.action.type}(${agentResponse.action.selector})`));
             console.error(chalk.red(`   This action will NOT be added to history`));
+            
+            // Show full error details
+            if (error.response) {
+              console.error(chalk.red(`   HTTP Status: ${error.response.status}`));
+              console.error(chalk.red(`   Server Error: ${JSON.stringify(error.response.data, null, 2)}`));
+            }
+            if (error.stack) {
+              console.error(chalk.gray(`   Stack: ${error.stack.split('\n').slice(0, 5).join('\n')}`));
+            }
           }
           // Don't add failed actions to history, but continue to next step
         }

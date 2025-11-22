@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import chalk from 'chalk';
 import { PlaywrightController } from './playwright-controller';
 import { ClickAction, InputAction } from './types';
 import { spawn } from 'child_process';
@@ -7,6 +8,49 @@ import { spawn } from 'child_process';
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Add request logging middleware for debugging
+if (process.env.DEBUG_API || process.env.VERBOSE) {
+  app.use((req, res, next) => {
+    const start = Date.now();
+    const timestamp = new Date().toISOString();
+    console.error(chalk.cyan(`\n[${timestamp}] ${req.method} ${req.path}`));
+    
+    if (Object.keys(req.body || {}).length > 0) {
+      console.error(chalk.gray(`   Body: ${JSON.stringify(req.body, null, 2)}`));
+    }
+    if (Object.keys(req.query || {}).length > 0) {
+      console.error(chalk.gray(`   Query: ${JSON.stringify(req.query, null, 2)}`));
+    }
+    
+    // Log response
+    const originalSend = res.send;
+    res.send = function(data) {
+      const duration = Date.now() - start;
+      const statusColor = res.statusCode >= 400 ? chalk.red : chalk.green;
+      console.error(statusColor(`[${new Date().toISOString()}] ${req.method} ${req.path} → ${res.statusCode} (${duration}ms)`));
+      
+      if (res.statusCode >= 400) {
+        try {
+          const errorData = typeof data === 'string' ? JSON.parse(data) : data;
+          console.error(chalk.red(`   Error: ${JSON.stringify(errorData, null, 2)}`));
+        } catch (e) {
+          console.error(chalk.red(`   Error: ${data}`));
+        }
+      } else if (req.path === '/dom') {
+        const domData = typeof data === 'string' ? JSON.parse(data) : data;
+        console.error(chalk.gray(`   DOM elements returned: ${Array.isArray(domData) ? domData.length : 'N/A'}`));
+      } else if (req.path === '/state') {
+        const stateData = typeof data === 'string' ? JSON.parse(data) : data;
+        console.error(chalk.gray(`   URL: ${stateData.url || 'N/A'}`));
+      }
+      
+      return originalSend.call(this, data);
+    };
+    
+    next();
+  });
+}
 
 const controller = new PlaywrightController();
 let isInitialized = false;
@@ -98,10 +142,15 @@ app.post('/action/click', async (req, res) => {
       return res.status(400).json({ error: 'Browser not initialized. Call /init first.' });
     }
     const { selector }: ClickAction = req.body;
+    console.error(`[Server] /action/click received selector: "${selector}"`);
     await controller.click(selector);
     res.json({ success: true });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error(`[Server] /action/click error:`, error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
