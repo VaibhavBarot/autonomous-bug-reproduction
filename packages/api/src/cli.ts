@@ -5,6 +5,9 @@ import chalk from 'chalk';
 import { spawn } from 'child_process';
 import axios from 'axios';
 import { Orchestrator } from './orchestrator';
+import { FixSuggester } from './fix-suggester';
+import { OutputFormatter } from './output-formatter';
+import { ReportParser } from './report-parser';
 import { startDaytonaSandbox, DaytonaSandboxHandle } from './daytona-sandbox';
 import * as path from 'path';
 import * as fs from 'fs-extra';
@@ -13,8 +16,13 @@ const program = new Command();
 
 program
   .name('bugbot')
-  .description('Autonomous bug reproduction system')
-  .version('1.0.0')
+  .description('Autonomous bug reproduction and fix suggestion system')
+  .version('1.0.0');
+
+// Command 1: reproduce (default command)
+program
+  .command('reproduce', { isDefault: true })
+  .description('Reproduce a bug based on natural language description')
   .argument('<bug-description>', 'Description of the bug to reproduce')
   .option('-u, --url <url>', 'Target URL to test', 'http://localhost:3000')
   .option('-r, --runner-url <url>', 'Runner server URL', 'http://localhost:3001')
@@ -114,16 +122,16 @@ program
         serverNeedsStart = true;
       }
     }
-    
+
     if (serverNeedsStart) {
       console.log(chalk.yellow('Starting runner server...'));
-      
+
       // Determine if we're running from compiled code or source
       const isCompiled = __dirname.includes('dist');
       let runnerPath: string;
       let command: string;
       let args: string[];
-      
+
       if (isCompiled) {
         // Running from dist - use compiled server
         runnerPath = path.resolve(__dirname, '../../runner/dist/server.js');
@@ -135,18 +143,18 @@ program
         command = 'npx';
         args = ['tsx', runnerPath];
       }
-      
+
       const projectRoot = path.resolve(__dirname, '../../..');
-      
+
       // Verify the server file exists
       const fs = require('fs');
       if (!fs.existsSync(runnerPath)) {
         throw new Error(`Runner server file not found at: ${runnerPath}`);
       }
-      
+
       console.log(chalk.gray(`Starting server: ${command} ${args.join(' ')}`));
       console.log(chalk.gray(`Working directory: ${projectRoot}`));
-      
+
       // Start runner server in background with error logging
       const runnerProcess = spawn(command, args, {
         detached: true,
@@ -154,7 +162,7 @@ program
         env: { ...process.env, PORT: port.toString() },
         cwd: projectRoot
       });
-      
+
       // Log server output for debugging
       let serverOutput = '';
       runnerProcess.stdout?.on('data', (data) => {
@@ -162,7 +170,7 @@ program
         serverOutput += output + '\n';
         if (output) console.log(chalk.gray(`[Runner] ${output}`));
       });
-      
+
       runnerProcess.stderr?.on('data', (data) => {
         const output = data.toString().trim();
         serverOutput += output + '\n';
@@ -170,25 +178,25 @@ program
           console.error(chalk.red(`[Runner Error] ${output}`));
         }
       });
-      
+
       runnerProcess.on('error', (err) => {
         console.error(chalk.red(`Failed to start runner server: ${err.message}`));
         console.error(chalk.red(`Command: ${command} ${args.join(' ')}`));
         console.error(chalk.red(`Path: ${runnerPath}`));
         throw err;
       });
-      
+
       runnerProcess.on('exit', (code) => {
         if (code !== null && code !== 0) {
           console.error(chalk.red(`Runner server exited with code ${code}`));
           console.error(chalk.red(`Output: ${serverOutput}`));
         }
       });
-      
+
       // Wait for server to start with more retries
       let retries = 20; // Increased retries (10 seconds total)
       let serverStarted = false;
-      
+
       while (retries > 0) {
         await new Promise(resolve => setTimeout(resolve, 500));
         try {
@@ -204,19 +212,19 @@ program
           }
         }
       }
-      
+
       // Keep process reference to prevent it from being killed
       runnerProcess.unref();
     }
 
-    const runId = `run-${Date.now()}`;
+    const runId = Date.now().toString();
     console.log(chalk.gray(`Run ID: ${runId}\n`));
 
     // Determine provider and API key
     const provider = (options.provider === 'openai' ? 'openai' : 'gemini') as 'openai' | 'gemini';
-    const apiKey = options.apiKey || 
+    const apiKey = options.apiKey ||
       (provider === 'gemini' ? process.env.GEMINI_API_KEY : process.env.OPENAI_API_KEY) ||
-      process.env.GEMINI_API_KEY || 
+      process.env.GEMINI_API_KEY ||
       process.env.OPENAI_API_KEY;
 
     // Debug: log what we received (remove in production)
@@ -290,6 +298,7 @@ program
       console.log(chalk.cyan('Initializing browser...'));
       await orchestrator.initialize();
 
+      console.log(chalk.cyan(`Navigating to ${options.url}...`));
       console.log(chalk.cyan(`Navigating to ${targetUrl}...`));
       console.log(chalk.cyan(`Bug: ${bugDescription}\n`));
       console.log(chalk.yellow('Starting autonomous exploration...\n'));
@@ -300,8 +309,10 @@ program
       console.log(chalk.white(`Status: ${chalk.bold(report.status.toUpperCase())}`));
       console.log(chalk.white(`Steps: ${report.steps.length}`));
       console.log(chalk.white(`Duration: ${Math.round((report.endTime.getTime() - report.startTime.getTime()) / 1000)}s\n`));
-      
-      const reportPath = path.join(process.cwd(), 'runs', runId, 'report.html');
+
+      // Find project root by going up from this file's location
+      const projectRoot = path.resolve(__dirname, '../../..');
+      const reportPath = path.join(projectRoot, 'packages', 'runner', 'runs', runId, 'report.html');
       console.log(chalk.blue(`📊 Report: ${reportPath}\n`));
 
       if (report.status === 'reproduced') {
@@ -329,6 +340,124 @@ program
           // ignore
         });
       }
+    }
+  });
+
+// Command 2: suggest-fix
+program
+  .command('suggest-fix')
+  .description('Suggest code fixes for a bug reproduction report')
+  .argument('<run-id>', 'Run ID from bug reproduction (e.g., 1763908658341)')
+  .option('--api-key <key>', 'Gemini API key (or set GEMINI_API_KEY env var)')
+  .option('--codebase-path <path>', 'Path to codebase to analyze', 'test-app')
+  .option('--model <model>', 'Gemini model to use', 'gemini-2.5-pro')
+  .option('--verbose', 'Show detailed analysis logs', false)
+  .action(async (runId, options) => {
+    console.log(chalk.blue.bold('\n🔧 BugBot - Fix Suggester\n'));
+
+    // Strip 'run-' prefix if present (for backward compatibility)
+    if (runId.startsWith('run-')) {
+      runId = runId.substring(4);
+    }
+
+    // Find project root by going up from this file's location
+    const projectRoot = path.resolve(__dirname, '../../..');
+    
+    // Validate run directory exists
+    // Runs are stored in packages/runner/runs/
+    const runDir = path.join(projectRoot, 'packages', 'runner', 'runs', runId);
+    if (!await fs.pathExists(runDir)) {
+      console.error(chalk.red(`\n❌ Error: Run directory not found: ${runDir}\n`));
+      console.error(chalk.yellow(`Available runs:`));
+
+      const runsDir = path.join(projectRoot, 'packages', 'runner', 'runs');
+      if (await fs.pathExists(runsDir)) {
+        const runs = await fs.readdir(runsDir);
+        // Filter out non-directory files and the videos folder
+        const runDirs = [];
+        for (const r of runs) {
+          if (r === 'videos' || r.startsWith('.')) continue;
+          const fullPath = path.join(runsDir, r);
+          const stats = await fs.stat(fullPath);
+          if (stats.isDirectory()) {
+            runDirs.push(r);
+          }
+        }
+        if (runDirs.length > 0) {
+          runDirs.sort().reverse().slice(0, 10).forEach(run => {
+            console.error(chalk.gray(`  • ${run}`));
+          });
+        } else {
+          console.error(chalk.gray(`  No runs found. Run bug reproduction first.`));
+        }
+      }
+      console.error('');
+      process.exit(1);
+    }
+
+    // Get API key
+    const apiKey = options.apiKey || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      console.error(chalk.red(`\n❌ API key required. Set GEMINI_API_KEY environment variable or use --api-key flag.\n`));
+      process.exit(1);
+    }
+
+    // Validate codebase path exists
+    const codebasePath = path.resolve(process.cwd(), options.codebasePath);
+    if (!await fs.pathExists(codebasePath)) {
+      console.error(chalk.red(`\n❌ Error: Codebase path not found: ${codebasePath}\n`));
+      process.exit(1);
+    }
+
+    try {
+      // Create fix suggester
+      const suggester = new FixSuggester(apiKey, options.model);
+
+      // Generate fix suggestions
+      const suggestion = await suggester.suggestFixes(
+        runId,
+        options.codebasePath,
+        options.verbose
+      );
+
+      // Display results
+      const consoleOutput = OutputFormatter.formatConsoleOutput(suggestion);
+      console.log(consoleOutput);
+
+      // Save diff file
+      const diffPath = path.join(runDir, 'suggested-fixes.diff');
+      const diffContent = OutputFormatter.formatDiffFile(suggestion);
+      await fs.writeFile(diffPath, diffContent);
+      console.log(chalk.green(`\n💾 Saved diff to: ${diffPath}`));
+
+      // Save markdown report
+      const bugReport = await ReportParser.parse(runId);
+      const markdownPath = path.join(runDir, 'fix-analysis.md');
+      const markdownContent = OutputFormatter.formatMarkdownReport(
+        suggestion,
+        bugReport.bugDescription,
+        runId
+      );
+      await fs.writeFile(markdownPath, markdownContent);
+      console.log(chalk.green(`💾 Saved analysis to: ${markdownPath}\n`));
+
+      // Display summary
+      const summary = OutputFormatter.formatSummary(suggestion, true);
+      console.log(summary);
+
+      console.log(chalk.blue.bold('📌 Next Steps:\n'));
+      console.log(chalk.white(`1. Review the suggested fixes in ${chalk.cyan('fix-analysis.md')}`));
+      console.log(chalk.white(`2. Apply the diff using:`));
+      console.log(chalk.gray(`   cd ${options.codebasePath}`));
+      console.log(chalk.gray(`   git apply ../packages/runner/runs/${runId}/suggested-fixes.diff`));
+      console.log(chalk.white(`3. Test your application to verify the fix\n`));
+
+    } catch (error: any) {
+      console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
+      if (options.verbose && error.stack) {
+        console.error(chalk.gray(error.stack));
+      }
+      process.exit(1);
     }
   });
 

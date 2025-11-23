@@ -19,7 +19,9 @@ export async function runBugBot(config: OrchestratorConfig): Promise<ReportData>
     console.log(chalk.white(`Status: ${chalk.bold(report.status.toUpperCase())}`));
     console.log(chalk.white(`Steps: ${report.steps.length}`));
     console.log(chalk.white(`Duration: ${Math.round((report.endTime.getTime() - report.startTime.getTime()) / 1000)}s\n`));
-    const reportPath = path.join(process.cwd(), 'runs', runId, 'report.html');
+    // Find project root by going up from this file's location
+    const projectRoot = path.resolve(__dirname, '../../..');
+    const reportPath = path.join(projectRoot, 'packages', 'runner', 'runs', runId, 'report.html');
     console.log(chalk.blue(`📊 Report: ${reportPath}\n`));
     if (report.status === 'reproduced') {
       console.log(chalk.green('🎉 Bug was successfully reproduced!'));
