@@ -5,14 +5,22 @@ An autonomous system that uses LLM reasoning and Playwright automation to reprod
 ### Recent Enhancements
 
 - **LangChain-based 3‑phase workflow** in `@bugbot/agent`:
-  - Planner (test plan generation), Executor (tool-using agent), Analyzer (final bug report).
-- **Gemini integration via `ChatGoogleGenerativeAI`** using `gemini-2.5-flash`.
+  - Planner (test plan generation), Executor (tool-using agent), Analyzer (final bug report / verification summary).
+- **Gemini integration via `ChatGoogleGenerativeAI`** using **Gemini 2.x models** (default: `gemini-2.5-pro`).
 - **Richer Playwright runner**:
   - More robust selector handling (text, role, and explicit `xpath=` selectors).
   - Simplified DOM extraction with better error handling.
   - Captures **backend logs** via Node.js DevTools (exposed through `/state` and `/backend-logs`).
+  - Exposes a **BugBot Dashboard UI** (`/`) and **live status/log streaming** via SSE (`/logs`).
 - **New LangChain tools** for the executor:
   - `navigate`, `click`, `input`, `get_dom`, `get_state`, `get_network`, `get_screenshot`, `get_backend_logs`.
+- **CI / PR Verification Flow**:
+  - GitHub webhook (`/github-webhook`) listens for PR events, spins up a **Daytona sandbox** on the PR branch, runs BugBot, and posts a **verification comment** back to the PR (bug still present vs likely solved).
+  - Linear webhook (`/linear-webhook`) accepts Linear bug tickets and runs BugBot directly against the local test app.
+  - PR ↔ Linear linking: when a PR title/branch contains a Linear ticket key (e.g. `AIE-5`), BugBot fetches the **full ticket description** from Linear and uses it as the bug description.
+- **BugBot Dashboard** (non‑technical friendly):
+  - Shows high‑level status, bug context (source, PR, branch, Linear ticket, description) and a human‑readable activity timeline.
+  - Technical logs are still available behind a toggle for engineers.
 - **Additional test bug scenarios** in the sample app:
   - Cart count not updating visually.
   - Simulated backend 500 error when adding **Product 2** (`CART_DB_ERROR`), allowing the agent to reason over backend logs.
@@ -91,7 +99,7 @@ npx -p @bugbot/api bugbot "Bug description" --api-key YOUR_KEY
 
 1. **Bug Ticket Input**: You provide a bug description in natural language.
 2. **Planning Phase (PlannerAgent)**:
-   - Uses Gemini (`gemini-2.5-flash` via `ChatGoogleGenerativeAI`) + LangChain structured output.
+   - Uses Gemini (`gemini-2.5-pro` via `ChatGoogleGenerativeAI`) + LangChain structured output.
    - Produces a structured test plan (`steps[]` with `stepNumber`, `description`, `expectedOutcome`).
 3. **Execution Phase (ExecutorAgent)**:
    - For each step, gathers context using LangChain tools:
@@ -102,6 +110,9 @@ npx -p @bugbot/api bugbot "Bug description" --api-key YOUR_KEY
 4. **Analysis Phase (AnalyzerAgent)**:
    - Summarizes execution results, console errors, network activity, and (optionally) backend logs.
    - Determines whether the bug was reproduced and provides a root cause hypothesis and recommendations.
+   - In **verification mode** (PR webhook), interprets results as either:
+     - **Bug Still Present** – agent could reproduce the issue in the PR sandbox.
+     - **Bug Likely Solved** – agent could not reproduce the issue in the PR sandbox.
 5. **Report Generation (API package)**:
    - Produces `report.html` / `report.md` with:
      - Steps taken + LLM thoughts.
@@ -136,7 +147,7 @@ npx -p @bugbot/api bugbot "Bug description" --api-key YOUR_KEY
 │   └── api/             # Orchestration and CLI
 │       ├── src/
 │       │   ├── cli.ts                 # CLI entrypoint
-│       │   ├── orchestrator.ts        # Main control loop
+│       │   ├── orchestrator.ts        # Main control loop (used by CLI + webhooks)
 │       │   ├── artifact-manager.ts    # Artifact capture
 │       │   └── report-generator.ts    # Report generation
 │       └── package.json
@@ -148,6 +159,8 @@ npx -p @bugbot/api bugbot "Bug description" --api-key YOUR_KEY
 
 The runner package exposes a REST API:
 
+- `GET /` - BugBot Dashboard UI (live status + human‑readable activity timeline)
+- `GET /logs` - Server-Sent Events (SSE) stream for live status + logs (consumed by the dashboard)
 - `GET /health` - Health check (does **not** require Playwright to be initialized)
 - `POST /init` - Initialize browser (body: `{ headless: boolean }`)
 - `POST /navigate` - Navigate to URL (body: `{ url: string }`)
@@ -163,6 +176,15 @@ The runner package exposes a REST API:
 - `GET /backend-logs` - Direct access to recent backend logs
 - `POST /stop` - Stop tracing (body: `{ tracingPath: string }`)
 - `POST /close` - Close browser
+- `POST /github-webhook` - GitHub PR webhook:
+  - Verifies the HMAC signature using `GITHUB_WEBHOOK_SECRET`.
+  - For `pull_request` events (`opened`, `synchronize`, `reopened`):
+    - Spins up a **Daytona** sandbox on the PR branch.
+    - Runs BugBot in **verification mode** against the sandbox.
+    - Posts a verification comment back to the PR using `GITHUB_TOKEN`.
+- `POST /linear-webhook` - Linear issue webhook:
+  - Uses the Linear ticket title/description as the bug description.
+  - Runs BugBot against the local test app (default: `http://localhost:4200`).
 
 ## Agent Action Format
 
@@ -243,32 +265,27 @@ npx bugbot "When I click the login button, nothing happens"
 open runs/run-1234567890/report.html
 ```
 
-### Running the App in a Daytona Sandbox
+### Running in a Daytona Sandbox (PR Verification Flow)
 
 BugBot can also run against an app that is started inside a **Daytona sandbox** instead of your local machine.
-This is useful for ephemeral environments, CI, or when you want a clean, isolated dev workspace.
+This is wired into the GitHub webhook so that every PR can be tested in an isolated environment.
 
 Requirements:
 
-- Set `DAYTONA_API_KEY` (and optionally `DAYTONA_API_URL`, `DAYTONA_TARGET`) for the Daytona TypeScript SDK.
+- `DAYTONA_API_KEY` – API key for the Daytona TypeScript SDK.
 - Your app must be in a Git repo that can be cloned from inside the sandbox.
+- `GITHUB_WEBHOOK_SECRET` – shared secret configured in the GitHub webhook.
+- `GITHUB_TOKEN` – personal access token with `repo` permissions (for posting PR comments).
+- Optionally, `LINEAR_API_KEY` if you want BugBot to enrich the bug description from Linear issues.
 
-Example (app on `main` branch, running on port 3000):
+High level flow:
 
-```bash
-DAYTONA_API_KEY=... \
-bugbot "When I click the login button, nothing happens" \
-  --daytona \
-  --daytona-repo https://github.com/your-org/your-app.git \
-  --daytona-port 3000
-```
-
-You can customize how the app is started:
-
-- `--daytona-branch <branch>` – Git branch to clone (default: `main`)
-- `--daytona-project-path <path>` – Path inside the repo where the app lives (e.g. `apps/frontend`)
-- `--daytona-install-command <cmd>` – Install command (default: `npm install`)
-- `--daytona-start-command <cmd>` – Start command (default: `npm start`)
+1. GitHub sends a `pull_request` webhook → `/github-webhook`.
+2. Runner verifies the signature and spins up a **Daytona sandbox** on the PR branch.
+3. BugBot runs in **verification mode** against the sandbox URL.
+4. BugBot posts a **verification report comment** back to the PR:
+   - ✅ **Bug Likely Solved** – agent could not reproduce the bug.
+   - ⚠️ **Bug Still Present** – agent could reproduce the bug.
 
 ## Development
 
@@ -294,17 +311,17 @@ npm run dev "bug description"
 
 This is a hackathon MVP with the following limitations:
 
-- Simple DOM extraction (no true deep visual reasoning; screenshots are captured but not yet fed into the LLM)
+- Simple DOM extraction (no true deep visual reasoning; screenshots are captured but multimodal input is currently disabled for stability)
 - Basic action set (click, input, navigate, inspect network/backend logs)
 - No support for complex interactions (drag & drop, file uploads, etc.)
 - Limited error recovery
-- No Daytona integration (designed for local development)
+- Daytona integration is currently focused on the **GitHub PR verification** flow (not yet exposed via CLI flags)
 
 Future improvements could include:
 - Visual element detection using screenshots / multimodal Gemini models
 - More action types (scroll, hover, etc.)
 - Better error handling and retry logic
-- Daytona ephemeral environment integration
+- Richer Daytona configuration via CLI (multiple apps, multi-port setups)
 - Support for multiple browsers
 - Parallel test execution
 

@@ -34,20 +34,7 @@ export async function extractSimplifiedDOM(page: Page): Promise<DOMElement[]> {
             return;
           }
 
-          let text = (element.textContent || '').trim() || element.getAttribute('aria-label') || element.getAttribute('title') || '';
-          
-          // If this is a button inside a product card, prepend the product name
-          // so the LLM can see e.g. "Product 2 - Add to Cart".
-          if (element.tagName.toLowerCase() === 'button') {
-            const card = element.closest('.product-card');
-            if (card) {
-              const nameEl = card.querySelector('.product-name');
-              const nameText = nameEl && nameEl.textContent ? nameEl.textContent.trim() : '';
-              if (nameText) {
-                text = nameText + ' - ' + (text || 'button');
-              }
-            }
-          }
+          const text = (element.textContent || '').trim() || element.getAttribute('aria-label') || element.getAttribute('title') || '';
           const role = element.getAttribute('role') || element.tagName.toLowerCase();
           
           const getXPath = (node) => {

@@ -1,9 +1,10 @@
 // This module exposes a function to run BugBot orchestration directly from code
 import { Orchestrator, OrchestratorConfig } from './orchestrator';
+import { ReportData } from './report-generator';
 import chalk from 'chalk';
 import path from 'path';
 
-export async function runBugBot(config: OrchestratorConfig): Promise<void> {
+export async function runBugBot(config: OrchestratorConfig): Promise<ReportData> {
   const runId = Date.now().toString();
   const orchestrator = new Orchestrator(config, runId);
   try {
@@ -26,6 +27,7 @@ export async function runBugBot(config: OrchestratorConfig): Promise<void> {
     } else {
       console.log(chalk.red('❌ Bug reproduction failed.'));
     }
+    return report;
   } catch (error: any) {
     console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
     throw error;

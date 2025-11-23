@@ -17,7 +17,7 @@ export type BugReport = z.infer<typeof BugReportSchema>;
 export class AnalyzerAgent {
   private model: ChatGoogleGenerativeAI;
 
-  constructor(modelName: string = "gemini-2.5-flash", apiKey?: string) {
+  constructor(modelName: string = "gemini-2.5-pro", apiKey?: string) {
     const config: any = {
       model: modelName,
       temperature: 0,
