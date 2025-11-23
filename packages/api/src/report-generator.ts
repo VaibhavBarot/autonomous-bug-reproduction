@@ -3,27 +3,28 @@ import { AgentAction, AgentObservation } from '@bugbot/agent';
 import { NetworkEntry } from '@bugbot/runner';
 
 export interface ReportData {
-  bugDescription: string;
-  startTime: Date;
-  endTime: Date;
-  status: 'reproduced' | 'failed' | 'timeout';
-  steps: Array<{
-    stepNumber: number;
-    action: AgentAction;
-    observation: AgentObservation;
-    thought?: string;
-  }>;
-  networkEntries: NetworkEntry[];
-  consoleErrors: string[];
-  artifacts: ArtifactPaths;
+    bugDescription: string;
+    startTime: Date;
+    endTime: Date;
+    status: 'reproduced' | 'failed' | 'timeout';
+    steps: Array<{
+        stepNumber: number;
+        action: AgentAction;
+        observation: AgentObservation;
+        thought?: string;
+    }>;
+    networkEntries: NetworkEntry[];
+    consoleErrors: string[];
+    artifacts: ArtifactPaths;
+    diagram?: string | null;
 }
 
 export class ReportGenerator {
-  static generateHTML(data: ReportData): string {
-    const duration = Math.round((data.endTime.getTime() - data.startTime.getTime()) / 1000);
-    const statusColor = data.status === 'reproduced' ? '#ef4444' : data.status === 'failed' ? '#f59e0b' : '#6b7280';
-    
-    return `<!DOCTYPE html>
+    static generateHTML(data: ReportData): string {
+        const duration = Math.round((data.endTime.getTime() - data.startTime.getTime()) / 1000);
+        const statusColor = data.status === 'reproduced' ? '#ef4444' : data.status === 'failed' ? '#f59e0b' : '#6b7280';
+
+        return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -189,22 +190,33 @@ export class ReportGenerator {
             </div>
         </div>
 
-        <div class="steps">
-            <h2>Execution Steps</h2>
-            ${data.steps.map((step, idx) => `
-                <div class="step">
-                    <div class="step-number">Step ${step.stepNumber}</div>
-                    ${step.thought ? `<div class="thought">💭 ${this.escapeHtml(step.thought)}</div>` : ''}
-                    <div class="action">
-                        ${step.action.type.toUpperCase()}: ${this.escapeHtml(step.action.selector)}${step.action.text ? ` - "${this.escapeHtml(step.action.text)}"` : ''}
+        <div class="steps-container" style="display: flex; gap: 20px; margin-top: 30px;">
+            <div class="steps-list" style="flex: 1; min-width: 0;">
+                <h2>Execution Steps</h2>
+                ${data.steps.map((step, idx) => `
+                    <div class="step">
+                        <div class="step-number">Step ${step.stepNumber}</div>
+                        ${step.thought ? `<div class="thought">💭 ${this.escapeHtml(step.thought)}</div>` : ''}
+                        <div class="action">
+                            ${step.action.type.toUpperCase()}: ${this.escapeHtml(step.action.selector)}${step.action.text ? ` - "${this.escapeHtml(step.action.text)}"` : ''}
+                        </div>
+                        <div class="observation">
+                            <div class="observation-item"><strong>URL:</strong> ${this.escapeHtml(step.observation.state.url)}</div>
+                            <div class="observation-item"><strong>Title:</strong> ${this.escapeHtml(step.observation.state.title)}</div>
+                            <div class="observation-item"><strong>Clickable Elements:</strong> ${step.observation.dom.filter(e => e.clickable).length}</div>
+                        </div>
                     </div>
-                    <div class="observation">
-                        <div class="observation-item"><strong>URL:</strong> ${this.escapeHtml(step.observation.state.url)}</div>
-                        <div class="observation-item"><strong>Title:</strong> ${this.escapeHtml(step.observation.state.title)}</div>
-                        <div class="observation-item"><strong>Clickable Elements:</strong> ${step.observation.dom.filter(e => e.clickable).length}</div>
-                    </div>
+                `).join('')}
+            </div>
+            
+            ${data.diagram ? `
+            <div class="diagram-section" style="flex: 0 0 450px; position: sticky; top: 20px; height: fit-content; background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <h2 style="margin-bottom: 20px; font-size: 1.2em; color: #1f2937;">Architectural Flow</h2>
+                <div class="diagram-content">
+                    ${data.diagram}
                 </div>
-            `).join('')}
+            </div>
+            ` : ''}
         </div>
 
         ${data.consoleErrors.length > 0 ? `
@@ -239,9 +251,9 @@ export class ReportGenerator {
         <div class="conclusion">
             <h2>Conclusion</h2>
             <p>
-                ${data.status === 'reproduced' 
-                    ? '✅ Bug was successfully reproduced. The issue was observed during the test execution.' 
-                    : data.status === 'failed'
+                ${data.status === 'reproduced'
+                ? '✅ Bug was successfully reproduced. The issue was observed during the test execution.'
+                : data.status === 'failed'
                     ? '❌ Bug reproduction failed. The agent was unable to reproduce the issue within the given constraints.'
                     : '⏱️ Test timed out before completion.'}
             </p>
@@ -249,12 +261,12 @@ export class ReportGenerator {
     </div>
 </body>
 </html>`;
-  }
+    }
 
-  static generateMarkdown(data: ReportData): string {
-    const duration = Math.round((data.endTime.getTime() - data.startTime.getTime()) / 1000);
-    
-    return `# Bug Reproduction Report
+    static generateMarkdown(data: ReportData): string {
+        const duration = Math.round((data.endTime.getTime() - data.startTime.getTime()) / 1000);
+
+        return `# Bug Reproduction Report
 
 ## Summary
 
@@ -300,23 +312,23 @@ ${data.networkEntries.slice(-20).map(e => `- ${e.method} ${e.url} ${e.status ? `
 
 ## Conclusion
 
-${data.status === 'reproduced' 
-    ? '✅ Bug was successfully reproduced.' 
-    : data.status === 'failed'
-    ? '❌ Bug reproduction failed.'
-    : '⏱️ Test timed out.'}
+${data.status === 'reproduced'
+                ? '✅ Bug was successfully reproduced.'
+                : data.status === 'failed'
+                    ? '❌ Bug reproduction failed.'
+                    : '⏱️ Test timed out.'}
 `;
-  }
+    }
 
-  private static escapeHtml(text: string): string {
-    const map: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#039;'
-    };
-    return text.replace(/[&<>"']/g, m => map[m]);
-  }
+    private static escapeHtml(text: string): string {
+        const map: Record<string, string> = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return text.replace(/[&<>"']/g, m => map[m]);
+    }
 }
 

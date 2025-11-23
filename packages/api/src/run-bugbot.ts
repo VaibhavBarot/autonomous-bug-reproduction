@@ -14,6 +14,7 @@ export async function runBugBot(config: OrchestratorConfig): Promise<ReportData>
     console.log(chalk.cyan(`Bug: ${config.bugDescription}\n`));
     console.log(chalk.yellow('Starting autonomous exploration...\n'));
     const report = await orchestrator.execute();
+
     console.log(chalk.green.bold('\n✅ Execution Complete!\n'));
     console.log(chalk.white(`Status: ${chalk.bold(report.status.toUpperCase())}`));
     console.log(chalk.white(`Steps: ${report.steps.length}`));
