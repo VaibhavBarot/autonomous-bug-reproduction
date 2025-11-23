@@ -5,74 +5,65 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>BugBot Dashboard</title>
   <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: radial-gradient(circle at top left, #283a4d, #0d1117 55%);
-      color: #e0e0e0;
+    * {
       margin: 0;
-      padding: 24px;
-      min-height: 100vh;
+      padding: 0;
       box-sizing: border-box;
     }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: #0d1117;
+      color: #e0e0e0;
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    
+    /* Header */
+    .header {
+      background: rgba(13, 17, 23, 0.95);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      backdrop-filter: blur(12px);
+      z-index: 100;
+    }
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
     h1 {
-      margin: 0 0 12px 0;
+      margin: 0;
       color: #00aaff;
       display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 24px;
+      font-size: 20px;
+      font-weight: 600;
     }
     h1 span.logo {
-      font-size: 28px;
+      font-size: 24px;
       animation: spin 5s linear infinite;
     }
     @keyframes spin {
       0% { transform: rotate(0deg); }
       100% { transform: rotate(360deg); }
     }
-    .layout {
-      display: grid;
-      grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
-      gap: 16px;
-      align-items: flex-start;
-    }
-    .card {
-      background: rgba(13, 17, 23, 0.95);
-      border-radius: 12px;
-      padding: 16px 18px;
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.6);
-      border: 1px solid rgba(255, 255, 255, 0.04);
-      backdrop-filter: blur(12px);
-      position: relative;
-      overflow: hidden;
-    }
-    .card::before {
-      content: "";
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(circle at top left, rgba(0, 170, 255, 0.18), transparent 55%);
-      opacity: 0;
-      transition: opacity 0.3s ease;
-      pointer-events: none;
-    }
-    .card:hover::before {
-      opacity: 1;
-    }
-    .card h2 {
-      margin: 0 0 8px 0;
-      font-size: 16px;
-      color: #9cc9ff;
-    }
     #status-bar {
       display: flex;
       align-items: center;
       gap: 8px;
-      margin-bottom: 16px;
     }
     .status-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 999px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
       background: #ff5555;
       box-shadow: 0 0 0 0 rgba(255, 85, 85, 0.6);
       animation: pulse-disconnected 1.4s infinite;
@@ -84,153 +75,448 @@
     }
     @keyframes pulse-live {
       0% { box-shadow: 0 0 0 0 rgba(0, 255, 123, 0.6); }
-      70% { box-shadow: 0 0 0 10px rgba(0, 255, 123, 0); }
+      70% { box-shadow: 0 0 0 8px rgba(0, 255, 123, 0); }
       100% { box-shadow: 0 0 0 0 rgba(0, 255, 123, 0); }
     }
     @keyframes pulse-disconnected {
       0% { box-shadow: 0 0 0 0 rgba(255, 85, 85, 0.6); }
-      70% { box-shadow: 0 0 0 10px rgba(255, 85, 85, 0); }
+      70% { box-shadow: 0 0 0 8px rgba(255, 85, 85, 0); }
       100% { box-shadow: 0 0 0 0 rgba(255, 85, 85, 0); }
     }
     .status-text {
+      font-size: 13px;
+      color: #c9d1d9;
+    }
+    .status-indicator {
       font-weight: 600;
-      font-size: 14px;
+      color: #e0e0e0;
     }
     .pill {
       display: inline-flex;
       align-items: center;
-      padding: 2px 8px;
-      border-radius: 999px;
+      padding: 4px 10px;
+      border-radius: 12px;
       background: rgba(99, 110, 255, 0.2);
       font-size: 11px;
       text-transform: uppercase;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.05em;
+      color: #9cc9ff;
     }
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    /* Sidebar Toggle Buttons */
+    .sidebar-toggle {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      color: #c9d1d9;
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .sidebar-toggle:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .sidebar-toggle.active {
+      background: rgba(0, 170, 255, 0.2);
+      border-color: rgba(0, 170, 255, 0.4);
+      color: #00aaff;
+    }
+    
+    /* Main Layout */
+    .main-container {
+      flex: 1;
+      display: flex;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    /* Chat Interface */
+    .chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: #0d1117;
+      transition: margin-right 0.3s ease;
+    }
+    .chat-container.timeline-open {
+      margin-right: 320px;
+    }
+    
+    #chat-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    #chat-messages::-webkit-scrollbar {
+      width: 8px;
+    }
+    #chat-messages::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    #chat-messages::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 4px;
+    }
+    #chat-messages::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+    
+    .chat-message {
+      display: flex;
+      gap: 12px;
+      max-width: 85%;
+      animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .chat-message.user {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+    .chat-message.bot {
+      align-self: flex-start;
+    }
+    .message-bubble {
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.5;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .chat-message.user .message-bubble {
+      background: #00aaff;
+      color: #ffffff;
+      border-bottom-right-radius: 4px;
+    }
+    .chat-message.bot .message-bubble {
+      background: rgba(255, 255, 255, 0.05);
+      color: #e0e0e0;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-bottom-left-radius: 4px;
+    }
+    .message-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      flex-shrink: 0;
+    }
+    .chat-message.user .message-avatar {
+      background: rgba(0, 170, 255, 0.2);
+    }
+    .chat-message.bot .message-avatar {
+      background: rgba(255, 255, 255, 0.1);
+    }
+    
+    .chat-input-container {
+      padding: 16px 24px;
+      background: rgba(13, 17, 23, 0.95);
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(12px);
+    }
+    #chat-form {
+      display: flex;
+      gap: 12px;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    #chat-input {
+      flex: 1;
+      padding: 12px 16px;
+      border-radius: 24px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.05);
+      color: #e0e0e0;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    #chat-input:focus {
+      border-color: rgba(0, 170, 255, 0.5);
+      background: rgba(255, 255, 255, 0.08);
+    }
+    #chat-form button {
+      padding: 12px 24px;
+      border-radius: 24px;
+      border: none;
+      background: #00aaff;
+      color: white;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    #chat-form button:hover {
+      background: #0099e6;
+      transform: translateY(-1px);
+    }
+    #chat-form button:active {
+      transform: translateY(0);
+    }
+    
+    /* Activity Timeline Sidebar */
+    .sidebar {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 320px;
+      height: 100vh;
+      background: rgba(13, 17, 23, 0.98);
+      border-left: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      transform: translateX(100%);
+      transition: transform 0.3s ease;
+      z-index: 200;
+      display: flex;
+      flex-direction: column;
+      box-shadow: -4px 0 24px rgba(0, 0, 0, 0.5);
+    }
+    .sidebar.open {
+      transform: translateX(0);
+    }
+    .sidebar-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sidebar-header h2 {
+      font-size: 16px;
+      color: #9cc9ff;
+      margin: 0;
+    }
+    .sidebar-close {
+      background: transparent;
+      border: none;
+      color: #c9d1d9;
+      cursor: pointer;
+      font-size: 20px;
+      padding: 4px;
+      border-radius: 4px;
+      transition: all 0.2s ease;
+    }
+    .sidebar-close:hover {
+      background: rgba(255, 255, 255, 0.1);
+      color: #ffffff;
+    }
+    .sidebar-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+    }
+    .sidebar-content::-webkit-scrollbar {
+      width: 6px;
+    }
+    .sidebar-content::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .sidebar-content::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+    }
+    
     #timeline {
       list-style: none;
       padding: 0;
-      margin: 4px 0 0 0;
-      max-height: 360px;
-      overflow-y: auto;
+      margin: 0;
     }
     .timeline-item {
       position: relative;
-      padding-left: 18px;
-      margin-bottom: 8px;
+      padding-left: 20px;
+      margin-bottom: 12px;
       font-size: 13px;
       color: #c9d1d9;
+      line-height: 1.5;
       opacity: 0;
-      transform: translateY(8px);
-      animation: slide-in 0.25s forwards;
+      transform: translateX(-10px);
+      animation: slideInRight 0.3s ease forwards;
+    }
+    @keyframes slideInRight {
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
     }
     .timeline-item::before {
       content: "";
       position: absolute;
       left: 6px;
-      top: 5px;
+      top: 6px;
       width: 6px;
       height: 6px;
       border-radius: 50%;
       background: #00aaff;
     }
-    @keyframes slide-in {
-      to {
-        opacity: 1;
-        transform: translateY(0);
-      }
+    
+    /* Technical Logs Sidebar */
+    #logs-sidebar {
+      bottom: 0;
+      top: auto;
+      height: 400px;
+      border-left: none;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      transform: translateY(100%);
     }
-    #logs-container {
-      margin-top: 16px;
-    }
-    #logs-toggle {
-      background: transparent;
-      border-radius: 999px;
-      border: 1px solid rgba(148, 163, 184, 0.7);
-      color: #cbd5f5;
-      font-size: 12px;
-      padding: 4px 10px;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-    #logs-toggle:hover {
-      background: rgba(148, 163, 184, 0.12);
+    #logs-sidebar.open {
+      transform: translateY(0);
     }
     #logs {
-      margin-top: 8px;
-      max-height: 240px;
-      background-color: #020817;
-      color: #8bff8b;
       font-family: 'Consolas', 'Monaco', monospace;
-      padding: 10px 12px;
-      overflow-y: auto;
-      border-radius: 8px;
-      border: 1px solid #1f2937;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      display: none;
+      font-size: 12px;
+      line-height: 1.6;
     }
-    .log-entry { margin-bottom: 2px; }
-    .log-error { color: #ff6b6b; }
-    .log-info { color: #9ca3af; }
-    .status-indicator { font-weight: 600; }
+    .log-entry {
+      margin-bottom: 4px;
+      padding: 4px 0;
+    }
+    .log-entry.log-error {
+      color: #ff6b6b;
+    }
+    .log-entry.log-info {
+      color: #8bff8b;
+    }
+    
+    /* Welcome Message */
+    .welcome-message {
+      text-align: center;
+      color: #6b7280;
+      font-size: 14px;
+      padding: 40px 20px;
+      margin: auto;
+    }
   </style>
 </head>
 <body>
-  <h1><span class="logo">🐞</span> BugBot Dashboard</h1>
-  <div id="status-bar">
-    <div id="status-dot" class="status-dot"></div>
-    <div class="status-text">Status: <span id="status-text" class="status-indicator">Connecting...</span></div>
-    <span class="pill" id="source-pill">Waiting for run...</span>
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <h1><span class="logo">🐞</span> BugBot</h1>
+      <div id="status-bar">
+        <div id="status-dot" class="status-dot"></div>
+        <div class="status-text">Status: <span id="status-text" class="status-indicator">Connecting...</span></div>
+        <span class="pill" id="source-pill" style="margin-left: 12px;">Waiting for run...</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="sidebar-toggle" id="timeline-toggle">
+        <span>📋</span>
+        <span>Timeline</span>
+      </button>
+      <button class="sidebar-toggle" id="logs-toggle">
+        <span>📝</span>
+        <span>Logs</span>
+      </button>
+    </div>
   </div>
 
-  <div class="layout">
-    <section class="card">
-      <h2>Ask BugBot</h2>
-      <div id="chat-messages" style="max-height: 380px; overflow-y: auto; margin-bottom: 10px;">
-        <div class="timeline-item">
+  <!-- Main Container -->
+  <div class="main-container">
+    <!-- Chat Interface -->
+    <div class="chat-container" id="chat-container">
+      <div id="chat-messages">
+        <div class="welcome-message">
           Ask what BugBot did, whether the bug reproduced, or if the fix is likely working.
         </div>
       </div>
-      <form id="chat-form" style="display:flex; gap:8px; margin-top:8px;">
-        <input id="chat-input" type="text" placeholder="Ask a question about this run…"
-               style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid #4b5563;
-                      background:#020817; color:#e5e7eb; font-size:13px;">
-        <button type="submit"
-                style="padding:8px 14px; border-radius:8px; border:none; background:#00aaff;
-                       color:white; font-size:13px; cursor:pointer;">
-          Ask
-        </button>
-      </form>
-    </section>
+      <div class="chat-input-container">
+        <form id="chat-form">
+          <input id="chat-input" type="text" placeholder="Ask a question about this run…" autocomplete="off" />
+          <button type="submit">Send</button>
+        </form>
+      </div>
+    </div>
 
-    <section class="card">
-      <h2>Activity Timeline</h2>
-      <ul id="timeline"></ul>
-    </section>
-  </div>
+    <!-- Activity Timeline Sidebar -->
+    <div class="sidebar" id="timeline-sidebar">
+      <div class="sidebar-header">
+        <h2>Activity Timeline</h2>
+        <button class="sidebar-close" id="timeline-close">×</button>
+      </div>
+      <div class="sidebar-content">
+        <ul id="timeline"></ul>
+      </div>
+    </div>
 
-  <div id="logs-container">
-    <button id="logs-toggle">Show technical logs</button>
-    <div id="logs"></div>
+    <!-- Technical Logs Sidebar -->
+    <div class="sidebar" id="logs-sidebar">
+      <div class="sidebar-header">
+        <h2>Technical Logs</h2>
+        <button class="sidebar-close" id="logs-close">×</button>
+      </div>
+      <div class="sidebar-content">
+        <div id="logs"></div>
+      </div>
+    </div>
   </div>
 
   <script>
-    const logsDiv = document.getElementById('logs');
+    const chatMessages = document.getElementById('chat-messages');
+    const chatForm = document.getElementById('chat-form');
+    const chatInput = document.getElementById('chat-input');
     const statusText = document.getElementById('status-text');
     const statusDot = document.getElementById('status-dot');
     const sourcePill = document.getElementById('source-pill');
     const timelineEl = document.getElementById('timeline');
+    const logsDiv = document.getElementById('logs');
+    const chatContainer = document.getElementById('chat-container');
+    
+    // Sidebar toggles
+    const timelineToggle = document.getElementById('timeline-toggle');
     const logsToggle = document.getElementById('logs-toggle');
-    const chatMessages = document.getElementById('chat-messages');
-    const chatForm = document.getElementById('chat-form');
-    const chatInput = document.getElementById('chat-input');
+    const timelineSidebar = document.getElementById('timeline-sidebar');
+    const logsSidebar = document.getElementById('logs-sidebar');
+    const timelineClose = document.getElementById('timeline-close');
+    const logsClose = document.getElementById('logs-close');
 
+    // Sidebar state
+    let timelineOpen = false;
+    let logsOpen = false;
+
+    // Timeline toggle
+    timelineToggle.addEventListener('click', () => {
+      timelineOpen = !timelineOpen;
+      timelineSidebar.classList.toggle('open', timelineOpen);
+      timelineToggle.classList.toggle('active', timelineOpen);
+      chatContainer.classList.toggle('timeline-open', timelineOpen);
+    });
+    timelineClose.addEventListener('click', () => {
+      timelineOpen = false;
+      timelineSidebar.classList.remove('open');
+      timelineToggle.classList.remove('active');
+      chatContainer.classList.remove('timeline-open');
+    });
+
+    // Logs toggle
     logsToggle.addEventListener('click', () => {
-      const visible = logsDiv.style.display === 'block';
-      logsDiv.style.display = visible ? 'none' : 'block';
-      logsToggle.textContent = visible ? 'Show technical logs' : 'Hide technical logs';
+      logsOpen = !logsOpen;
+      logsSidebar.classList.toggle('open', logsOpen);
+      logsToggle.classList.toggle('active', logsOpen);
+    });
+    logsClose.addEventListener('click', () => {
+      logsOpen = false;
+      logsSidebar.classList.remove('open');
+      logsToggle.classList.remove('active');
     });
 
     function appendTechLog(message, type = 'info') {
@@ -238,32 +524,30 @@
       entry.className = `log-entry log-${type}`;
       entry.textContent = message;
       logsDiv.appendChild(entry);
-      logsDiv.scrollTop = logsDiv.scrollHeight; // Auto-scroll
+      logsDiv.scrollTop = logsDiv.scrollHeight;
     }
 
     function appendChatMessage(sender, text) {
-      const wrapper = document.createElement('div');
-      wrapper.style.marginBottom = '6px';
-      const bubble = document.createElement('div');
-      bubble.style.display = 'inline-block';
-      bubble.style.padding = '6px 10px';
-      bubble.style.borderRadius = '8px';
-      bubble.style.fontSize = '13px';
-      bubble.style.maxWidth = '100%';
-      bubble.style.whiteSpace = 'pre-wrap';
-      bubble.textContent = text;
-      if (sender === 'user') {
-        wrapper.style.textAlign = 'right';
-        bubble.style.background = '#1d4ed8';
-        bubble.style.color = '#ffffff';
-      } else {
-        wrapper.style.textAlign = 'left';
-        bubble.style.background = '#020817';
-        bubble.style.color = '#e5e7eb';
-        bubble.style.border = '1px solid #1f2937';
+      // Remove welcome message if present
+      const welcomeMsg = chatMessages.querySelector('.welcome-message');
+      if (welcomeMsg) {
+        welcomeMsg.remove();
       }
-      wrapper.appendChild(bubble);
-      chatMessages.appendChild(wrapper);
+
+      const messageDiv = document.createElement('div');
+      messageDiv.className = `chat-message ${sender}`;
+      
+      const avatar = document.createElement('div');
+      avatar.className = 'message-avatar';
+      avatar.textContent = sender === 'user' ? '👤' : '🐞';
+      
+      const bubble = document.createElement('div');
+      bubble.className = 'message-bubble';
+      bubble.textContent = text;
+      
+      messageDiv.appendChild(avatar);
+      messageDiv.appendChild(bubble);
+      chatMessages.appendChild(messageDiv);
       chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
@@ -272,7 +556,7 @@
       item.className = 'timeline-item';
       item.textContent = message;
       timelineEl.prepend(item);
-      while (timelineEl.children.length > 40) {
+      while (timelineEl.children.length > 50) {
         timelineEl.removeChild(timelineEl.lastChild);
       }
     }
@@ -311,12 +595,13 @@
       }
     });
 
+    // SSE connection
     function connect() {
       const eventSource = new EventSource('/logs');
 
       eventSource.onopen = () => {
         statusText.textContent = 'Live';
-        statusText.style.color = '#00ff00';
+        statusText.style.color = '#00ff7b';
         statusDot.classList.add('live');
         appendTechLog('--- Connected to log stream ---', 'info');
         addTimelineEvent('Connected to BugBot runner.');
@@ -350,7 +635,7 @@
             appendTechLog(msg, 'info');
           } else if (data.type === 'error') {
             appendTechLog(data.message, 'error');
-            addTimelineEvent(`Error: ${data.message}`);
+            addTimelineEvent(`Error: ${data.message.substring(0, 100)}${data.message.length > 100 ? '...' : ''}`);
           } else if (data.type === 'status') {
             statusText.textContent = data.message;
             addTimelineEvent(data.message);

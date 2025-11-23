@@ -1,6 +1,7 @@
 import { Browser, BrowserContext, Page, chromium } from 'playwright';
 import { DOMElement, NetworkEntry, BrowserState } from './types';
 import { extractSimplifiedDOM } from './dom-simplifier';
+import { StagehandController } from './stagehand-controller';
 import * as fs from 'fs';
 import * as path from 'path';
 import CDP from 'chrome-remote-interface';
@@ -14,41 +15,120 @@ export class PlaywrightController {
   private tracingPath: string | null = null;
   private backendLogs: string[] = [];
   private cdpClient: any = null;
+  private stagehandController: StagehandController = new StagehandController();
+  private stagehandApiKey?: string;
+  private stagehandModelProvider?: string;
 
-  async initialize(headless: boolean = false): Promise<void> {
-    try {
-      this.browser = await chromium.launch({ 
-        headless,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'] // Help with some permission issues
-      });
-    } catch (error: any) {
-      if (error.message.includes('Executable doesn\'t exist') || error.message.includes('BrowserType')) {
-        throw new Error('Chromium browser not installed. Run: npx playwright install chromium');
+  async initialize(headless: boolean = false, stagehandApiKey?: string, stagehandModelProvider?: string): Promise<void> {
+    this.stagehandApiKey = stagehandApiKey;
+    this.stagehandModelProvider = stagehandModelProvider;
+    
+    // If Stagehand is enabled, let it manage the browser and connect Playwright to it
+    if (stagehandApiKey) {
+      try {
+        console.log('[PlaywrightController] Attempting to initialize Stagehand with API key...');
+        // Stagehand creates and manages the browser
+        // It returns a CDP endpoint that Playwright connects to
+        const cdpEndpoint = await this.stagehandController.initialize(stagehandApiKey, stagehandModelProvider, headless);
+        console.log('[PlaywrightController] Stagehand initialized, CDP endpoint:', cdpEndpoint);
+        
+        // Get the browser and page from Stagehand (connected via CDP)
+        this.browser = this.stagehandController.getBrowser();
+        this.page = this.stagehandController.getPage();
+        
+        if (!this.browser || !this.page) {
+          throw new Error('Failed to get browser/page from Stagehand');
+        }
+        
+        console.log('[PlaywrightController] Got browser and page from Stagehand');
+        
+        // Get or create the context
+        const contexts = this.browser.contexts();
+        if (contexts.length > 0) {
+          this.context = contexts[0];
+          console.log('[PlaywrightController] Using existing context from Stagehand browser');
+        } else {
+          // Create a new context with our settings
+          console.log('[PlaywrightController] Creating new context with video recording...');
+          const videoDir = path.join(process.cwd(), 'runs', 'videos');
+          if (!fs.existsSync(videoDir)) {
+            fs.mkdirSync(videoDir, { recursive: true });
+          }
+          
+          this.context = await this.browser.newContext({
+            viewport: { width: 1280, height: 720 },
+            recordVideo: {
+              dir: videoDir,
+              size: { width: 1280, height: 720 }
+            },
+            extraHTTPHeaders: {
+              'X-Daytona-Skip-Preview-Warning': 'true'
+            }
+          });
+          
+          // Get the page from the new context
+          this.page = await this.context.newPage();
+          console.log('[PlaywrightController] Created new page in new context');
+        }
+        
+        console.log('[PlaywrightController] ✅ Successfully connected to Stagehand-managed browser via CDP');
+      } catch (error: any) {
+        console.error('[PlaywrightController] ❌ Stagehand initialization failed:', error.message);
+        console.error('[PlaywrightController] Error stack:', error.stack);
+        console.error('[PlaywrightController] Falling back to regular Playwright browser...');
+        // Fall back to regular Playwright browser
+        stagehandApiKey = undefined; // Clear so we use regular initialization
       }
-      throw error;
     }
     
-    try {
-      // Ensure video directory exists
-      const videoDir = path.join(process.cwd(), 'runs', 'videos');
-      if (!fs.existsSync(videoDir)) {
-        fs.mkdirSync(videoDir, { recursive: true });
+    // If Stagehand failed or wasn't requested, use regular Playwright browser
+    if (!this.browser) {
+      try {
+        this.browser = await chromium.launch({ 
+          headless,
+          args: ['--no-sandbox', '--disable-setuid-sandbox']
+        });
+      } catch (error: any) {
+        if (error.message.includes('Executable doesn\'t exist') || error.message.includes('BrowserType')) {
+          throw new Error('Chromium browser not installed. Run: npx playwright install chromium');
+        }
+        throw error;
       }
       
-      this.context = await this.browser.newContext({
-        viewport: { width: 1280, height: 720 },
-        recordVideo: {
-          dir: videoDir,
-          size: { width: 1280, height: 720 }
+      try {
+        // Ensure video directory exists
+        const videoDir = path.join(process.cwd(), 'runs', 'videos');
+        if (!fs.existsSync(videoDir)) {
+          fs.mkdirSync(videoDir, { recursive: true });
         }
-      });
-    } catch (error: any) {
-      await this.browser.close();
-      throw new Error(`Failed to create browser context: ${error.message}`);
+        
+        this.context = await this.browser.newContext({
+          viewport: { width: 1280, height: 720 },
+          recordVideo: {
+            dir: videoDir,
+            size: { width: 1280, height: 720 }
+          },
+          extraHTTPHeaders: {
+            'X-Daytona-Skip-Preview-Warning': 'true'
+          }
+        });
+      } catch (error: any) {
+        await this.browser.close();
+        throw new Error(`Failed to create browser context: ${error.message}`);
+      }
+
+      this.page = await this.context.newPage();
     }
 
-    this.page = await this.context.newPage();
-
+    // Set up all Playwright features (works the same whether browser is from Stagehand or regular Playwright)
+    // Ensure page and context are initialized
+    if (!this.page) {
+      throw new Error('Page not initialized');
+    }
+    if (!this.context) {
+      throw new Error('Context not initialized');
+    }
+    
     // Capture console errors
     this.page.on('console', (msg) => {
       if (msg.type() === 'error') {
@@ -75,7 +155,7 @@ export class PlaywrightController {
       }
     });
 
-    // Start tracing
+    // Start tracing (Playwright API - works on any browser)
     await this.context.tracing.start({
       screenshots: true,
       snapshots: true
@@ -348,7 +428,34 @@ export class PlaywrightController {
     return await this.page.video()?.path() || null;
   }
 
+  // Stagehand methods for smarter actions
+  async act(instruction: string): Promise<string> {
+    if (!this.stagehandController.isInitialized()) {
+      throw new Error('Stagehand not initialized. Make sure API key is provided when initializing browser.');
+    }
+    return await this.stagehandController.act(instruction);
+  }
+
+  async extract(instruction: string, schema?: any): Promise<any> {
+    if (!this.stagehandController.isInitialized()) {
+      throw new Error('Stagehand not initialized. Make sure API key is provided when initializing browser.');
+    }
+    return await this.stagehandController.extract(instruction, schema);
+  }
+
+  async observe(): Promise<any> {
+    if (!this.stagehandController.isInitialized()) {
+      throw new Error('Stagehand not initialized. Make sure API key is provided when initializing browser.');
+    }
+    return await this.stagehandController.observe();
+  }
+
   async close(): Promise<void> {
+    // Cleanup Stagehand
+    if (this.stagehandController) {
+      await this.stagehandController.cleanup().catch(() => {});
+    }
+    
     if (this.context && this.tracingPath) {
       await this.context.tracing.stop({ path: this.tracingPath });
     }
