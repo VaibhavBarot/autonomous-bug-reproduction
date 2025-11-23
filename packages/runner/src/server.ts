@@ -7,6 +7,7 @@ import { spawn } from 'child_process';
 import * as crypto from 'crypto';
 import * as path from 'path';
 import * as dotenv from 'dotenv';
+import { ChatGoogleGenerativeAI } from '@langchain/google-genai';
 
 // Load env vars from root .env file
 // Try multiple paths to locate .env
@@ -42,12 +43,20 @@ app.use(express.json({
 }));
 app.use(express.static(path.join(__dirname, '../public'))); // Serve static frontend
 
-// SSE Clients
+// SSE Clients + in-memory log buffer for chat
 let sseClients: any[] = [];
+let collectedLogs: { type: 'log' | 'error' | 'status'; message: string }[] = [];
 
 // Broadcast log to all connected clients
 function broadcastLog(type: 'log' | 'error' | 'status', message: string) {
-  const payload = JSON.stringify({ type, message });
+  const entry = { type, message };
+  collectedLogs.push(entry);
+  // Keep only the most recent 500 lines for chat context
+  if (collectedLogs.length > 500) {
+    collectedLogs = collectedLogs.slice(-500);
+  }
+
+  const payload = JSON.stringify(entry);
   sseClients.forEach(client => {
     client.write(`data: ${payload}\n\n`);
   });
@@ -80,6 +89,59 @@ app.get('/logs', (req, res) => {
   req.on('close', () => {
     sseClients = sseClients.filter(client => client !== res);
   });
+});
+
+// Simple chat endpoint over collected logs
+app.post('/chat', async (req, res) => {
+  try {
+    const question = (req.body && req.body.question) || '';
+    if (!question || typeof question !== 'string') {
+      return res.status(400).json({ error: 'Missing question in request body.' });
+    }
+    if (!process.env.GEMINI_API_KEY) {
+      return res.status(500).json({ error: 'GEMINI_API_KEY not configured on runner.' });
+    }
+
+    const model = new ChatGoogleGenerativeAI({
+      model: 'gemini-2.5-pro',
+      apiKey: process.env.GEMINI_API_KEY,
+      temperature: 0,
+    } as any);
+
+    const contextText = collectedLogs
+      .map(l => `[${l.type.toUpperCase()}] ${l.message}`)
+      .join('\n')
+      .slice(-15000); // Keep last ~15k chars to stay compact
+
+    const prompt = `
+You are BugBot, a QA assistant explaining an automated bug reproduction / verification run
+to a non-technical stakeholder.
+
+You are given the recent system logs and a user question.
+
+LOGS (most recent last):
+${contextText}
+
+USER QUESTION:
+${question}
+
+INSTRUCTIONS:
+- Answer in clear, simple language (no stack traces, no code unless explicitly asked).
+- Summarize what happened, what BugBot tried, and the current bug status if relevant.
+- If something is unclear from the logs, say so and explain what extra info would be needed.
+`;
+
+    const llmResult: any = await (model as any).invoke(prompt);
+    const text =
+      Array.isArray(llmResult.content) && llmResult.content.length > 0
+        ? (llmResult.content[0] as any).text ?? JSON.stringify(llmResult.content[0])
+        : (llmResult.text ?? JSON.stringify(llmResult));
+
+    return res.json({ answer: String(text).trim() });
+  } catch (error: any) {
+    console.error('[Chat] Error handling chat request:', error);
+    return res.status(500).json({ error: error.message || 'Chat error' });
+  }
 });
 
 // Helper to verify GitHub webhook signature
@@ -200,7 +262,7 @@ app.post('/init', async (req, res) => {
     console.log(`[Server] Initializing browser (headless: ${headless})...`);
     await controller.initialize(headless);
     isInitialized = true;
-    console.error(`[Server] Browser initialized successfully`);
+    console.log(`[Server] Browser initialized successfully`);
     res.json({ success: true });
   } catch (error: any) {
     console.error(`[Server] Browser initialization failed:`, error);
@@ -245,7 +307,7 @@ app.post('/action/click', async (req, res) => {
       return res.status(400).json({ error: 'Browser not initialized. Call /init first.' });
     }
     const { selector }: ClickAction = req.body;
-    console.error(`[Server] /action/click received selector: "${selector}"`);
+    console.log(`[Server] /action/click received selector: "${selector}"`);
     await controller.click(selector);
     res.json({ success: true });
   } catch (error: any) {
@@ -550,36 +612,100 @@ ${JSON.stringify(reportData.steps, null, 2)}
   }
 });
 
+// Linear webhook deduplication cache
+// Store processed webhook events: key = issueId + updatedAt, value = timestamp
+const processedLinearEvents = new Map<string, number>();
+const DEDUP_TTL = 5 * 60 * 1000; // 5 minutes
+
+// Clean up old entries periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, timestamp] of processedLinearEvents.entries()) {
+    if (now - timestamp > DEDUP_TTL) {
+      processedLinearEvents.delete(key);
+    }
+  }
+}, 60000); // Clean every minute
+
 // Linear webhook endpoint
 app.post('/linear-webhook', async (req, res) => {
   try {
-    const bugTitle = req.body.data?.title || 'No title';
-    const bugDescription = req.body.data?.description || bugTitle;
-    console.log(req.body.data)
-    console.log(`[Linear Webhook] Received bug: ${bugTitle}`);
+    const action = req.body.action; // e.g., "create", "update", "remove"
+    const issueData = req.body.data;
+    const webhookId = req.body.webhookId || req.body.id;
+    
+    // Send immediate response to Linear
+    res.status(200).json({ received: true });
 
-    console.log(`[Linear Webhook] Bug description: ${bugDescription}`);
-    // Call BugBot orchestration function directly
-    const { runBugBot } = require('../../api/src/run-bugbot');
-    const config = {
-      runnerUrl: 'http://localhost:3001',
-      targetUrl: 'http://localhost:4200',
-      bugDescription,
-      maxSteps: 20,
-      timeout: 300 * 1000,
-      apiKey: process.env.GEMINI_API_KEY,
-      provider: 'gemini',
-      headless: false,
-      verbose: false
-    };
-    try {
-      await runBugBot(config);
-      res.json({ success: true, received: bugDescription });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
+    // Only process "create" or "update" actions
+    if (action !== 'create' && action !== 'update') {
+      broadcastLog('log', `[Linear Webhook] Ignoring action: ${action}`);
+      return;
     }
+
+    if (!issueData) {
+      broadcastLog('log', '[Linear Webhook] No issue data in payload');
+      return;
+    }
+
+    const issueId = issueData.id || issueData.identifier;
+    const updatedAt = issueData.updatedAt || Date.now();
+    
+    // Deduplication: check if we've already processed this event
+    const dedupKey = `${issueId}-${updatedAt}`;
+    if (processedLinearEvents.has(dedupKey)) {
+      broadcastLog('log', `[Linear Webhook] Duplicate event ignored: ${issueId} (${action})`);
+      return;
+    }
+
+    // Mark as processed
+    processedLinearEvents.set(dedupKey, Date.now());
+
+    const bugTitle = issueData.title || 'No title';
+    const bugDescription = issueData.description || bugTitle;
+    
+    // For "update" actions, check if description actually changed
+    // (Linear might send updates for other fields like assignee, status, etc.)
+    if (action === 'update') {
+      // If description is missing or unchanged, skip BugBot run
+      // Note: Linear doesn't always send the full issue in update events
+      // So we'll process it if description is present
+      if (!issueData.description) {
+        broadcastLog('log', `[Linear Webhook] Update event for ${issueId} has no description change, skipping`);
+        return;
+      }
+    }
+
+    broadcastLog('log', `[Linear Webhook] Processing ${action} event for: ${bugTitle}`);
+    broadcastLog('log', `[Linear Webhook] Bug description: ${bugDescription}`);
+    broadcastLog('status', `Processing Linear bug: ${bugTitle}`);
+
+    // Run BugBot in background (non-blocking)
+    (async () => {
+      try {
+        const { runBugBot } = require('../../api/src/run-bugbot');
+        const config = {
+          runnerUrl: 'http://localhost:3001',
+          targetUrl: 'http://localhost:4200',
+          bugDescription,
+          maxSteps: 20,
+          timeout: 300 * 1000,
+          apiKey: process.env.GEMINI_API_KEY,
+          provider: 'gemini',
+          headless: false,
+          verbose: false
+        };
+        await runBugBot(config);
+        broadcastLog('status', `Linear bug run completed: ${bugTitle}`);
+      } catch (err: any) {
+        broadcastLog('error', `[Linear Webhook] BugBot run failed: ${err.message}`);
+        broadcastLog('status', `Linear bug run failed: ${bugTitle}`);
+      }
+    })();
+
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    broadcastLog('error', `[Linear Webhook] Error: ${error.message}`);
+    // Response already sent, so we can't send error response
   }
 });
 
