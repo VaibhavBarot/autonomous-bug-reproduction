@@ -61,7 +61,7 @@ export class Orchestrator {
     let baseUrl: string | undefined = undefined;
 
     if (config.provider === 'gemini') {
-      modelName = 'gemini-2.5-flash';
+      modelName = 'gemini-2.5-pro';
       baseUrl = undefined; // Native Gemini client, no OpenAI-compatible base URL needed
     }
 

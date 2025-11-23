@@ -7,7 +7,7 @@ This is a simple test application with a bug for BugBot to reproduce.
 **Bug Description**: "When I add item to cart, cart count does not increase"
 
 ### Bug Location
-The bug is in `frontend/index.html` in the `addToCart()` function. The `updateCartDisplay()` call is commented out, so when you add an item to the cart:
+The bug is in `frontend/index.html` in the `addToCart()` function. The `updateCartDisplay()` call is commented out, so when you add an item to the cart:::
 
 1. ✅ The item IS added to the cart (backend works correctly)
 2. ✅ The cart items list DOES update (if you refresh the page)

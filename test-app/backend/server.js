@@ -2,15 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const app = express();
 
-// In Daytona, the preview proxy injects its own Access-Control-Allow-Origin header.
-// If we also send "*", browsers see two different values and block the request.
-// We detect the Daytona sandbox via IN_DAYTONA and disable our own CORS header there,
-// letting Daytona handle CORS entirely. Locally we still enable CORS for 3000↔4200.
-const inDaytona = process.env.IN_DAYTONA === 'true';
-if (!inDaytona) {
-  app.use(cors());
-}
-
+app.use(cors());
 app.use(express.json());
 
 // In-memory cart storage

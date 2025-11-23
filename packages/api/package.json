@@ -8,8 +8,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "dev": "tsx src/cli.ts",
-    "daytona:test": "tsx src/daytona-test.ts"
+    "dev": "tsx src/cli.ts"
   },
   "dependencies": {
     "@daytonaio/sdk": "^0.115.0",
@@ -18,8 +17,7 @@
     "fs-extra": "^11.2.0",
     "@bugbot/agent": "*",
     "@bugbot/runner": "*",
-    "axios": "^1.6.2",
-    "dotenv": "^16.4.5"
+    "axios": "^1.6.2"
   },
   "devDependencies": {
     "tsx": "^4.7.0",

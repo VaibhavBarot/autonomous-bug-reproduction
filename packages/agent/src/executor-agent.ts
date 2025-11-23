@@ -25,7 +25,7 @@ export class ExecutorAgent {
   private model: ChatGoogleGenerativeAI;
   private runnerUrl: string;
 
-  constructor(runnerUrl: string, modelName: string = "gemini-2.5-flash", apiKey?: string, _baseUrl?: string) {
+  constructor(runnerUrl: string, modelName: string = "gemini-2.5-pro", apiKey?: string, _baseUrl?: string) {
     this.runnerUrl = runnerUrl;
 
     const config: any = {
@@ -33,9 +33,10 @@ export class ExecutorAgent {
       temperature: 0,
     };
     if (apiKey) config.apiKey = apiKey;
-
+  
     this.model = new ChatGoogleGenerativeAI(config);
   }
+  
 
   async executePlan(plan: TestPlan): Promise<ExecutionStepResult[]> {
     const results: ExecutionStepResult[] = [];
@@ -111,7 +112,7 @@ Choose ONE best tool to move this step forward:
 - "get_backend_logs" with args {} to inspect recent backend logs
 - "noop" if no action is needed (verification only).
 
-You are also provided a screenshot of the current page as an image. Use the screenshot to visually locate product names (e.g. "Product 2") and match them to their corresponding "Add to Cart" buttons when choosing selectors.
+You are also provided a screenshot of the current page.
 
 Return ONLY valid JSON in this exact format (no extra commentary before or after, no markdown):
 {
@@ -120,7 +121,7 @@ Return ONLY valid JSON in this exact format (no extra commentary before or after
   "args": { ... appropriate args ... }
 }`;
 
-        // Capture screenshot for reporting (but current Gemini model does not support image inputs)
+        // Capture screenshot for reporting
         const screenshotBase64 = await screenshotTool._call({});
 
         const llmResult: any = await (this.model as any).invoke(toolPrompt);
@@ -180,7 +181,7 @@ Return ONLY valid JSON in this exact format (no extra commentary before or after
           toolObservation = `Tool execution error: ${toolError.message || String(toolError)}`;
         }
 
-        // Reuse the same screenshot we already captured, if available;
+        // Reuse the same screenshot we already captured for the LLM, if available;
         // otherwise, fall back to capturing a fresh one.
         const screenshot =
           screenshotBase64 && !screenshotBase64.startsWith("Failed")
