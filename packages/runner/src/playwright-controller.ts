@@ -126,11 +126,11 @@ export class PlaywrightController {
     // SPECIAL CASE: If this is an explicit Playwright "xpath=" selector,
     // use it directly with locator and DO NOT try to parse it as text.
     if (cleanSelector.startsWith('xpath=')) {
-      console.error(`[Click] Detected explicit xpath selector, using locator directly: "${cleanSelector}"`);
+      console.log(`[Click] Detected explicit xpath selector, using locator directly: "${cleanSelector}"`);
       try {
         await this.page.locator(cleanSelector).first().click();
         await this.page.waitForTimeout(500);
-        console.error(`[Click] Successfully clicked xpath selector: "${cleanSelector}"`);
+        console.log(`[Click] Successfully clicked xpath selector: "${cleanSelector}"`);
         return;
       } catch (error: any) {
         console.error(`[Click] Error clicking xpath selector:`, error);
@@ -144,7 +144,7 @@ export class PlaywrightController {
       const parts = cleanSelector.split(/\s+or\s+/);
       if (parts.length >= 2) {
         let lastPart = parts[parts.length - 1].trim();
-        console.error(`[Click] Last part before cleaning: "${lastPart}"`);
+        console.log(`[Click] Last part before cleaning: "${lastPart}"`);
         
         // Remove outer quotes if present
         lastPart = lastPart.replace(/^["']|["']$/g, '');
@@ -156,42 +156,42 @@ export class PlaywrightController {
           // Remove quotes around the value
           textValue = textValue.replace(/^["']|["']$/g, '');
           cleanSelector = textValue;
-          console.error(`[Click] Extracted from text= pattern: "${cleanSelector}"`);
+          console.log(`[Click] Extracted from text= pattern: "${cleanSelector}"`);
         } else {
           // Use the last part as-is (should be the text)
           cleanSelector = lastPart;
-          console.error(`[Click] Using last part after "or": "${cleanSelector}"`);
+          console.log(`[Click] Using last part after "or": "${cleanSelector}"`);
         }
       } else {
         // Fallback: try to extract text="..." pattern directly
         const textMatch = cleanSelector.match(/text\s*=\s*["']([^"']+)["']/);
         if (textMatch && textMatch[1]) {
           cleanSelector = textMatch[1];
-          console.error(`[Click] Extracted text from text= pattern: "${cleanSelector}"`);
+          console.log(`[Click] Extracted text from text= pattern: "${cleanSelector}"`);
         } else {
           // Try to find any quoted text
           const quotedMatch = cleanSelector.match(/["']([^"']+)["']/);
           if (quotedMatch && quotedMatch[1]) {
             cleanSelector = quotedMatch[1];
-            console.error(`[Click] Extracted quoted text: "${cleanSelector}"`);
+            console.log(`[Click] Extracted quoted text: "${cleanSelector}"`);
           }
         }
       }
     }
     
-    console.error(`[Click] Original selector: "${originalSelector}"`);
-    console.error(`[Click] Cleaned selector (after first pass): "${cleanSelector}"`);
+    console.log(`[Click] Original selector: "${originalSelector}"`);
+    console.log(`[Click] Cleaned selector (after first pass): "${cleanSelector}"`);
     
     // Final safety check: if cleaned selector still contains " or " or looks like a complex selector,
     // try to extract just the text part more aggressively
     if (cleanSelector.includes(' or ') || cleanSelector.includes('text=') || (cleanSelector.includes('=') && !cleanSelector.startsWith('#'))) {
-      console.error(`[Click] Selector still contains problematic patterns, attempting aggressive extraction...`);
+      console.log(`[Click] Selector still contains problematic patterns, attempting aggressive extraction...`);
       
       // Try to extract text from text="..." pattern more aggressively
       const aggressiveMatch = cleanSelector.match(/text\s*=\s*["']([^"']+)["']/);
       if (aggressiveMatch && aggressiveMatch[1]) {
         cleanSelector = aggressiveMatch[1];
-        console.error(`[Click] Aggressive extraction from text=: "${cleanSelector}"`);
+        console.log(`[Click] Aggressive extraction from text=: "${cleanSelector}"`);
       } else {
         // Try to find any quoted text that looks like button text
         const quotedParts = cleanSelector.match(/["']([A-Za-z0-9\s]+)["']/g);
@@ -199,7 +199,7 @@ export class PlaywrightController {
           // Take the longest quoted text (likely the button text)
           const longest = quotedParts.reduce((a, b) => a.length > b.length ? a : b);
           cleanSelector = longest.replace(/["']/g, '');
-          console.error(`[Click] Using longest quoted text: "${cleanSelector}"`);
+          console.log(`[Click] Using longest quoted text: "${cleanSelector}"`);
         } else {
           // Last resort: extract text after "or" or after "="
           const afterOr = cleanSelector.split(/\s+or\s+/).pop() || '';
@@ -208,12 +208,12 @@ export class PlaywrightController {
           const candidate1 = afterOr.replace(/^["']|["']$/g, '').trim();
           const candidate2 = afterEquals.replace(/^["']|["']$/g, '').trim();
           cleanSelector = candidate1.length > candidate2.length ? candidate1 : candidate2;
-          console.error(`[Click] Using text after "or" or "=": "${cleanSelector}"`);
+          console.log(`[Click] Using text after "or" or "=": "${cleanSelector}"`);
         }
       }
     }
     
-    console.error(`[Click] Final cleaned selector: "${cleanSelector}"`);
+    console.log(`[Click] Final cleaned selector: "${cleanSelector}"`);
     
     try {
       // Try different selector strategies in order of preference
@@ -227,29 +227,29 @@ export class PlaywrightController {
           !cleanSelector.includes('getByRole') &&
           !cleanSelector.includes(' or ') &&
           !cleanSelector.includes('=')) {
-        console.error(`[Click] Using getByText with: "${cleanSelector}"`);
+        console.log(`[Click] Using getByText with: "${cleanSelector}"`);
         await this.page.getByText(cleanSelector, { exact: false }).first().click();
       }
       // 2. If it starts with text=, extract and use getByText
       else if (cleanSelector.startsWith('text=')) {
         const text = cleanSelector.replace('text=', '').replace(/"/g, '').replace(/'/g, '').trim();
-        console.error(`[Click] Using getByText (from text=): "${text}"`);
+        console.log(`[Click] Using getByText (from text=): "${text}"`);
         await this.page.getByText(text, { exact: false }).first().click();
       }
       // 3. If it's quoted text, extract and use getByText
       else if (cleanSelector.match(/^["']([^"']+)["']$/)) {
         const text = cleanSelector.replace(/["']/g, '');
-        console.error(`[Click] Using getByText (from quotes): "${text}"`);
+        console.log(`[Click] Using getByText (from quotes): "${text}"`);
         await this.page.getByText(text, { exact: false }).first().click();
       }
       // 4. If it contains getByRole, parse it
       else if (cleanSelector.includes('getByRole')) {
         const match = cleanSelector.match(/getByRole\(['"]([^'"]+)['"],\s*\{\s*name:\s*['"]([^'"]+)['"]\s*\}\)/);
         if (match) {
-          console.error(`[Click] Using getByRole: role="${match[1]}", name="${match[2]}"`);
+          console.log(`[Click] Using getByRole: role="${match[1]}", name="${match[2]}"`);
           await this.page.getByRole(match[1] as any, { name: match[2] }).click();
         } else {
-          console.error(`[Click] Using locator (getByRole fallback): "${cleanSelector}"`);
+          console.log(`[Click] Using locator (getByRole fallback): "${cleanSelector}"`);
           await this.page.locator(cleanSelector).first().click();
         }
       }
@@ -265,16 +265,16 @@ export class PlaywrightController {
         }
         if (textMatch && textMatch[1]) {
           const fallbackText = textMatch[1].trim();
-          console.error(`[Click] Fallback: Using getByText with extracted text: "${fallbackText}"`);
+          console.log(`[Click] Fallback: Using getByText with extracted text: "${fallbackText}"`);
           await this.page.getByText(fallbackText, { exact: false }).first().click();
         } else {
           // Ultimate fallback: try to use getByRole with button
-          console.error(`[Click] Ultimate fallback: Trying getByRole('button') with text matching`);
+          console.log(`[Click] Ultimate fallback: Trying getByRole('button') with text matching`);
           // Extract any alphanumeric text from the selector
           const anyText = cleanSelector.match(/([A-Za-z][A-Za-z0-9\s]{3,})/);
           if (anyText && anyText[1]) {
             const buttonText = anyText[1].trim();
-            console.error(`[Click] Trying getByRole('button', { name: "${buttonText}" })`);
+            console.log(`[Click] Trying getByRole('button', { name: "${buttonText}" })`);
             await this.page.getByRole('button', { name: buttonText, exact: false }).first().click();
           } else {
             throw new Error(`Cannot parse selector: "${originalSelector}" (cleaned: "${cleanSelector}"). Please use a simpler selector format.`);
@@ -288,12 +288,12 @@ export class PlaywrightController {
           // This shouldn't happen, but if it does, throw an error
           throw new Error(`Invalid selector format: "${originalSelector}". Cannot use as CSS selector.`);
         }
-        console.error(`[Click] Using locator (CSS selector): "${cleanSelector}"`);
+        console.log(`[Click] Using locator (CSS selector): "${cleanSelector}"`);
         await this.page.locator(cleanSelector).first().click();
       }
       
       await this.page.waitForTimeout(500); // Wait for UI to update
-      console.error(`[Click] Successfully clicked: "${cleanSelector}"`);
+      console.log(`[Click] Successfully clicked: "${cleanSelector}"`);
     } catch (error: any) {
       console.error(`[Click] Error details:`, error);
       throw new Error(`Failed to click selector "${originalSelector}" (cleaned: "${cleanSelector}"): ${error.message}`);

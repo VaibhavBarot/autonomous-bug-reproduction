@@ -197,7 +197,7 @@ app.get('/health', (req, res) => {
 app.post('/init', async (req, res) => {
   try {
     const { headless = false } = req.body;
-    console.error(`[Server] Initializing browser (headless: ${headless})...`);
+    console.log(`[Server] Initializing browser (headless: ${headless})...`);
     await controller.initialize(headless);
     isInitialized = true;
     console.error(`[Server] Browser initialized successfully`);
