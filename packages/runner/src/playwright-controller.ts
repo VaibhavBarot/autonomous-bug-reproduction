@@ -40,6 +40,13 @@ export class PlaywrightController {
         recordVideo: {
           dir: videoDir,
           size: { width: 1280, height: 720 }
+        },
+        // When using Daytona preview links, a warning page is normally shown
+        // the first time the URL is opened in a browser. Sending this header
+        // tells Daytona to skip that warning and go straight to the app.
+        // See: https://www.daytona.io/docs/en/preview-and-authentication/
+        extraHTTPHeaders: {
+          'X-Daytona-Skip-Preview-Warning': 'true'
         }
       });
     } catch (error: any) {

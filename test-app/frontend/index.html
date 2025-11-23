@@ -174,7 +174,31 @@
     </div>
 
     <script>
-        const API_URL = 'http://localhost:3000/api';
+        // Determine backend API URL dynamically so the app works both locally and in Daytona.
+        // - Locally: frontend runs on http://localhost:4200 and backend on http://localhost:3000
+        // - Daytona: frontend preview is on https://4200-<id>.proxy.daytona.works
+        //            backend preview is on  https://3000-<id>.proxy.daytona.works
+        let API_URL;
+        (function() {
+            const { protocol, hostname, port } = window.location;
+
+            // Local development: frontend on 4200, backend on 3000
+            if ((hostname === 'localhost' || hostname === '127.0.0.1') && port === '4200') {
+                API_URL = 'http://localhost:3000/api';
+                return;
+            }
+
+            // Daytona preview: derive backend host by swapping 4200- prefix to 3000-
+            if (/^4200-.*\.proxy\.daytona\.works$/.test(hostname)) {
+                const backendHost = hostname.replace(/^4200-/, '3000-');
+                API_URL = `${protocol}//${backendHost}/api`;
+                return;
+            }
+
+            // Fallback: same origin /api
+            API_URL = `${protocol}//${hostname}${port ? ':' + port : ''}/api`;
+        })();
+
         let cart = { items: [], total: 0 };
 
         // Load products on page load

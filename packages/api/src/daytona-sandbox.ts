@@ -62,9 +62,11 @@ export async function startDaytonaSandbox(
   console.log(chalk.cyan('\n🌊 Creating Daytona sandbox...'));
 
   const sandbox = await daytona.create({
+    public: true,
     language: 'typescript',
     envVars: {
       NODE_ENV: 'development',
+      IN_DAYTONA: 'true',
       ...env,
     },
   } as any);
@@ -101,22 +103,35 @@ export async function startDaytonaSandbox(
     console.log(chalk.gray(`Daytona: ${installCmd}`));
     await sandbox.process.executeCommand(installCmd);
 
-    // 3. Start the app and DO NOT await the command, so we don't block on a long-running server.
-    //    We "fire and forget" the start command and give the app a short boot time.
+    // 3. Start the app using Daytona's long‑running process API when available
+    //    so the backend/frontend stay alive for the duration of the sandbox.
     const startCmd = `cd ${projectDir} && ${startCommand}`;
     console.log(chalk.gray(`Daytona: ${startCmd}`));
-    sandbox.process.executeCommand(startCmd).catch((e: any) => {
-      console.warn(
-        chalk.yellow(
-          `Daytona: start command reported an error (may be after preview is available): ${
-            e?.message || e
-          }`
-        )
-      );
-    });
 
-    // Give the app some time to start listening before requesting a preview link
-    await new Promise((resolve) => setTimeout(resolve, 15000));
+    const processApi: any = (sandbox as any).process;
+    if (processApi && typeof processApi.start === 'function') {
+      // Hint Daytona which port will be exposed for preview
+      await processApi.start({
+        command: startCmd,
+        ports: [port],
+      });
+    } else {
+      // Fallback to fire‑and‑forget executeCommand
+      processApi
+        .executeCommand(startCmd)
+        .catch((e: any) => {
+          console.warn(
+            chalk.yellow(
+              `Daytona: start command reported an error (may be after preview is available): ${
+                e?.message || e
+              }`
+            )
+          );
+        });
+    }
+
+    // Give the app some time to boot before requesting a preview link
+    await new Promise((resolve) => setTimeout(resolve, 10000));
 
     // 4. Get a preview URL for the specified port
     const previewInfo: any = await (sandbox as any).getPreviewLink(port);
