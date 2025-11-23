@@ -36,6 +36,16 @@ app.post('/api/cart/add', (req, res) => {
     console.log(`[Backend] Add to cart failed: Product not found (ID: ${productId})`);
     return res.status(404).json({ error: 'Product not found' });
   }
+
+  // INTENTIONAL BACKEND BUG for testing:
+  // Simulate a backend failure when adding Product 2.
+  if (product.id === 2) {
+    console.error(`[Backend BUG] Simulated database failure while adding product ${product.name} (ID: ${product.id})`);
+    return res.status(500).json({
+      error: 'Simulated backend failure while adding item to cart',
+      code: 'CART_DB_ERROR'
+    });
+  }
   // Find existing item in cart
   const existingItem = cart.items.find(item => item.productId === productId);
   if (existingItem) {

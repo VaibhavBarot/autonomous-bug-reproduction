@@ -5,6 +5,7 @@ import chalk from 'chalk';
 import { spawn } from 'child_process';
 import axios from 'axios';
 import { Orchestrator } from './orchestrator';
+import { startDaytonaSandbox, DaytonaSandboxHandle } from './daytona-sandbox';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 
@@ -23,6 +24,26 @@ program
   .option('--api-key <key>', 'API key (or set GEMINI_API_KEY or OPENAI_API_KEY env var)')
   .option('--provider <provider>', 'LLM provider: gemini or openai', 'gemini')
   .option('--verbose', 'Show detailed LLM and interaction logs', false)
+  .option('--daytona', 'Run the target app inside a Daytona sandbox environment', false)
+  .option('--daytona-repo <url>', 'Git repository URL for the app to run in Daytona')
+  .option('--daytona-branch <branch>', 'Git branch to check out in the Daytona sandbox', 'main')
+  .option(
+    '--daytona-project-path <path>',
+    'Optional path inside the repo where the web app lives (e.g. test-app/frontend)'
+  )
+  .option(
+    '--daytona-port <port>',
+    'Port the app listens on inside the Daytona sandbox (used for preview URL)',
+    '3000'
+  )
+  .option(
+    '--daytona-install-command <cmd>',
+    'Install command to run in Daytona (default: npm install)'
+  )
+  .option(
+    '--daytona-start-command <cmd>',
+    'Start command to run in Daytona (default: npm start)'
+  )
   .action(async (bugDescription, options) => {
     console.log(chalk.blue.bold('\n🤖 BugBot - Autonomous Bug Reproduction System\n'));
 
@@ -30,6 +51,8 @@ program
     const runnerUrl = options.runnerUrl || 'http://localhost:3001';
     const port = parseInt(new URL(runnerUrl).port) || 3001;
     let serverNeedsStart = false;
+    let targetUrl: string = options.url || 'http://localhost:3000';
+    let daytonaHandle: DaytonaSandboxHandle | null = null;
     
     try {
       await axios.get(`${runnerUrl}/health`, { timeout: 2000 });
@@ -208,17 +231,47 @@ program
       process.exit(1);
     }
 
-    const orchestrator = new Orchestrator({
-      runnerUrl,
-      targetUrl: options.url,
-      bugDescription,
-      maxSteps: parseInt(options.maxSteps),
-      timeout: parseInt(options.timeout) * 1000,
-      apiKey,
-      provider,
-      headless: options.headless,
-      verbose: options.verbose || false
-    }, runId);
+    // If requested, spin up a Daytona sandbox and point BugBot at its preview URL
+    if (options.daytona) {
+      if (!options.daytonaRepo) {
+        console.error(
+          chalk.red(
+            '\n❌ Daytona sandbox mode requires --daytona-repo <git-url> so the app can be cloned into the sandbox.\n'
+          )
+        );
+        process.exit(1);
+      }
+
+      const daytonaPort = parseInt(options.daytonaPort || '3000', 10);
+
+      console.log(chalk.cyan('\n🌊 Starting Daytona sandbox for target app...\n'));
+      daytonaHandle = await startDaytonaSandbox({
+        repoUrl: options.daytonaRepo,
+        branch: options.daytonaBranch,
+        projectPath: options.daytonaProjectPath,
+        port: daytonaPort,
+        installCommand: options.daytonaInstallCommand,
+        startCommand: options.daytonaStartCommand,
+      });
+
+      targetUrl = daytonaHandle.appUrl;
+      console.log(chalk.green(`Using Daytona sandbox app URL as target: ${targetUrl}\n`));
+    }
+
+    const orchestrator = new Orchestrator(
+      {
+        runnerUrl,
+        targetUrl,
+        bugDescription,
+        maxSteps: parseInt(options.maxSteps),
+        timeout: parseInt(options.timeout) * 1000,
+        apiKey,
+        provider,
+        headless: options.headless,
+        verbose: options.verbose || false,
+      },
+      runId
+    );
 
     // Global error handler for the CLI process to catch unhandled promise rejections (like Axios errors)
     process.on('unhandledRejection', (reason: any, promise) => {
@@ -233,8 +286,8 @@ program
     try {
       console.log(chalk.cyan('Initializing browser...'));
       await orchestrator.initialize();
-      
-      console.log(chalk.cyan(`Navigating to ${options.url}...`));
+
+      console.log(chalk.cyan(`Navigating to ${targetUrl}...`));
       console.log(chalk.cyan(`Bug: ${bugDescription}\n`));
       console.log(chalk.yellow('Starting autonomous exploration...\n'));
 
@@ -261,7 +314,18 @@ program
       } else {
           console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
       }
+      if (daytonaHandle) {
+        await daytonaHandle.stop().catch(() => {
+          // ignore
+        });
+      }
       process.exit(1);
+    } finally {
+      if (daytonaHandle) {
+        await daytonaHandle.stop().catch(() => {
+          // ignore
+        });
+      }
     }
   });
 

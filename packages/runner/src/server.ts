@@ -74,8 +74,8 @@ async function monitorBackendLogs() {
     Runtime.exceptionThrown((payload: { exceptionDetails: { text: string } }) => {
       backendLogs.push(`[exception] ${payload.exceptionDetails.text}`);
     });
-  } catch (err) {
-    backendLogs.push(`[monitor error] ${err}`);
+  } catch (err: any) {
+    backendLogs.push(`[monitor error] ${err?.message || String(err)}`);
   }
 }
 
@@ -256,10 +256,10 @@ app.post('/linear-webhook', async (req, res) => {
     try {
       await runBugBot(config);
       res.json({ success: true, received: bugDescription });
-    } catch (err) {
+    } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
-  } catch (error) {
+  } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
 });

@@ -116,6 +116,30 @@ export class GetStateTool extends PlaywrightBaseTool {
   }
 }
 
+export class GetBackendLogsTool extends PlaywrightBaseTool {
+  name = "get_backend_logs";
+  description = "Get recent backend logs captured from the Node.js server (via DevTools)";
+  schema = z.object({}) as any;
+
+  constructor(runnerUrl: string) {
+    super(runnerUrl);
+  }
+
+  async _call(input: any): Promise<string> {
+    try {
+      const response = await axios.get(`${this.runnerUrl}/state`);
+      const state = response.data || {};
+      const logs: string[] = state.backendLogs || [];
+      if (!logs.length) {
+        return "No backend logs captured yet.";
+      }
+      return logs.join("\n");
+    } catch (error: any) {
+      return `Failed to get backend logs: ${error.message}`;
+    }
+  }
+}
+
 export class GetNetworkTool extends PlaywrightBaseTool {
   name = "get_network";
   description = "Get network activity logs";
@@ -150,7 +174,8 @@ export class GetScreenshotTool extends PlaywrightBaseTool {
   async _call(input: any): Promise<string> {
     try {
       const response = await axios.get(`${this.runnerUrl}/screenshot`);
-      return "Screenshot captured successfully (base64 data hidden)";
+      // Return raw base64 so the LLM can see the screenshot as an image input
+      return response.data?.screenshot || "";
     } catch (error: any) {
       return `Failed to capture screenshot: ${error.message}`;
     }

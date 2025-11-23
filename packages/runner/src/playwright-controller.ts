@@ -122,6 +122,21 @@ export class PlaywrightController {
     // Clean up selector - handle "or" patterns and extract text
     let cleanSelector = selector.trim();
     const originalSelector = selector;
+
+    // SPECIAL CASE: If this is an explicit Playwright "xpath=" selector,
+    // use it directly with locator and DO NOT try to parse it as text.
+    if (cleanSelector.startsWith('xpath=')) {
+      console.error(`[Click] Detected explicit xpath selector, using locator directly: "${cleanSelector}"`);
+      try {
+        await this.page.locator(cleanSelector).first().click();
+        await this.page.waitForTimeout(500);
+        console.error(`[Click] Successfully clicked xpath selector: "${cleanSelector}"`);
+        return;
+      } catch (error: any) {
+        console.error(`[Click] Error clicking xpath selector:`, error);
+        throw new Error(`Failed to click xpath selector "${originalSelector}": ${error.message}`);
+      }
+    }
     
     // Handle selectors like "button or text="Add to Cart"" or 'button or text="Add to Cart"'
     if (cleanSelector.includes(' or ')) {

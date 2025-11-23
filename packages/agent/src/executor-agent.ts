@@ -6,7 +6,8 @@ import {
   GetDOMTool, 
   GetStateTool, 
   GetScreenshotTool, 
-  GetNetworkTool 
+  GetNetworkTool,
+  GetBackendLogsTool
 } from "./tools/playwright-tools";
 import { TestPlan } from "./planner-agent";
 import { AgentObservation } from "./types";
@@ -48,6 +49,7 @@ export class ExecutorAgent {
         const stateTool = new GetStateTool(this.runnerUrl);
         const screenshotTool = new GetScreenshotTool(this.runnerUrl);
         const networkTool = new GetNetworkTool(this.runnerUrl);
+        const backendLogsTool = new GetBackendLogsTool(this.runnerUrl);
         const navigateTool = new NavigateTool(this.runnerUrl);
         const clickTool = new ClickTool(this.runnerUrl);
         const inputTool = new InputTool(this.runnerUrl);
@@ -106,14 +108,20 @@ Choose ONE best tool to move this step forward:
 - "navigate" with args { "url": "<url>" }
 - "click" with args { "selector": "<locator or visible text>" }
 - "input" with args { "selector": "<input selector>", "text": "<text to type>" }
+- "get_backend_logs" with args {} to inspect recent backend logs
 - "noop" if no action is needed (verification only).
+
+You are also provided a screenshot of the current page as an image. Use the screenshot to visually locate product names (e.g. "Product 2") and match them to their corresponding "Add to Cart" buttons when choosing selectors.
 
 Return ONLY valid JSON in this exact format (no extra commentary before or after, no markdown):
 {
   "thought": "reason about what to do",
-  "tool": "navigate" | "click" | "input" | "noop",
+  "tool": "navigate" | "click" | "input" | "get_backend_logs" | "noop",
   "args": { ... appropriate args ... }
 }`;
+
+        // Capture screenshot for reporting (but current Gemini model does not support image inputs)
+        const screenshotBase64 = await screenshotTool._call({});
 
         const llmResult: any = await (this.model as any).invoke(toolPrompt);
         const rawText =
@@ -163,6 +171,8 @@ Return ONLY valid JSON in this exact format (no extra commentary before or after
               selector: args.selector,
               text: args.text,
             });
+          } else if (toolName === "get_backend_logs") {
+            toolObservation = await backendLogsTool._call({});
           } else {
             toolObservation = "No action taken (noop).";
           }
@@ -170,7 +180,12 @@ Return ONLY valid JSON in this exact format (no extra commentary before or after
           toolObservation = `Tool execution error: ${toolError.message || String(toolError)}`;
         }
 
-        const screenshot = await screenshotTool._call({});
+        // Reuse the same screenshot we already captured, if available;
+        // otherwise, fall back to capturing a fresh one.
+        const screenshot =
+          screenshotBase64 && !screenshotBase64.startsWith("Failed")
+            ? screenshotBase64
+            : await screenshotTool._call({});
 
         const detailedObservation: AgentObservation = {
           dom: currentDOM,

@@ -146,16 +146,9 @@ export class Orchestrator {
                 selector: step.description,
                 target: step.description
             },
-            observation: step.detailedObservation ? {
-                ...step.detailedObservation,
-                // Ensure networkEntries is present as required by the type, defaulting to empty if not captured per step
-                state: {
-                    ...step.detailedObservation.state,
-                    networkEntries: [] // Add missing property
-                }
-            } : {
+            observation: step.detailedObservation ? step.detailedObservation : {
                 dom: [],
-                state: { url: '', title: '', consoleErrors: [], networkEntries: [] }, // Add missing property
+                state: { url: '', title: '', consoleErrors: [], networkEntries: [], backendLogs: [] },
                 stepNumber: step.stepNumber,
                 screenshot: step.screenshot
             },
