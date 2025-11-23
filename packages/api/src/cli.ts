@@ -23,6 +23,8 @@ program
   .option('--api-key <key>', 'API key (or set GEMINI_API_KEY or OPENAI_API_KEY env var)')
   .option('--provider <provider>', 'LLM provider: gemini or openai', 'gemini')
   .option('--verbose', 'Show detailed LLM and interaction logs', false)
+  .option('--enable-database', 'Enable database query capabilities', false)
+  .option('--mongo-connection <string>', 'MongoDB connection string (or set MONGODB_CONNECTION_STRING env var)')
   .action(async (bugDescription, options) => {
     console.log(chalk.blue.bold('\n🤖 BugBot - Autonomous Bug Reproduction System\n'));
 
@@ -208,6 +210,19 @@ program
       process.exit(1);
     }
 
+    // Database configuration
+    const enableDatabase = options.enableDatabase || process.env.MCP_ENABLE_DATABASE_QUERIES === 'true';
+    const mongoConnectionString = options.mongoConnection || process.env.MONGODB_CONNECTION_STRING;
+
+    if (enableDatabase) {
+      if (!mongoConnectionString) {
+        console.error(chalk.red(`\n❌ MongoDB connection string required when database is enabled.`));
+        console.error(chalk.yellow(`Set MONGODB_CONNECTION_STRING environment variable or use --mongo-connection flag.\n`));
+        process.exit(1);
+      }
+      console.log(chalk.green('✓ Database queries enabled'));
+    }
+
     const orchestrator = new Orchestrator({
       runnerUrl,
       targetUrl: options.url,
@@ -217,7 +232,9 @@ program
       apiKey,
       provider,
       headless: options.headless,
-      verbose: options.verbose || false
+      verbose: options.verbose || false,
+      enableDatabase,
+      mongoConnectionString
     }, runId);
 
     // Global error handler for the CLI process to catch unhandled promise rejections (like Axios errors)

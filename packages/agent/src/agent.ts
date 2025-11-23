@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
-import { AgentObservation, AgentAction, AgentHistory, AgentResponse } from './types';
+import { AgentObservation, AgentAction, AgentHistory, AgentResponse, DatabaseContext } from './types';
 import { buildPrompt } from './prompt';
+import { MCPClient } from './mcp-client';
 import chalk from 'chalk';
 
 export type LLMProvider = 'openai' | 'gemini';
@@ -10,10 +11,27 @@ export class BugReproductionAgent {
   private model: string;
   private provider: LLMProvider;
   private verbose: boolean;
+  private mcpClient?: MCPClient;
+  private databaseEnabled: boolean;
+  private databaseContext: DatabaseContext = {};
 
-  constructor(apiKey?: string, provider: LLMProvider = 'gemini', model?: string, verbose: boolean = false) {
+  constructor(
+    apiKey?: string, 
+    provider: LLMProvider = 'gemini', 
+    model?: string, 
+    verbose: boolean = false,
+    enableDatabase: boolean = false,
+    mongoConnectionString?: string
+  ) {
     this.provider = provider;
     this.verbose = verbose;
+    this.databaseEnabled = enableDatabase && !!mongoConnectionString;
+
+    // Initialize MCP client if database is enabled
+    if (this.databaseEnabled && mongoConnectionString) {
+      const readOnly = process.env.MCP_READ_ONLY === 'true';
+      this.mcpClient = new MCPClient(mongoConnectionString, readOnly, verbose);
+    }
     
     // Set default model based on provider
     if (!model) {
@@ -45,12 +63,37 @@ export class BugReproductionAgent {
     }
   }
 
+  async initialize(): Promise<void> {
+    if (this.mcpClient && !this.mcpClient.isConnected()) {
+      try {
+        await this.mcpClient.connect();
+        
+        // Load available collections
+        const collectionsResult = await this.mcpClient.listCollections();
+        if (collectionsResult.success) {
+          this.databaseContext.collections = collectionsResult.data;
+        }
+
+        if (this.verbose) {
+          console.log(chalk.green('✓ MongoDB MCP client connected'));
+          if (this.databaseContext.collections) {
+            console.log(chalk.gray(`  Available collections: ${this.databaseContext.collections.join(', ')}`));
+          }
+        }
+      } catch (error: any) {
+        console.error(chalk.yellow(`⚠ Failed to connect to MongoDB MCP: ${error.message}`));
+        console.error(chalk.yellow('  Agent will continue without database query capabilities'));
+        this.databaseEnabled = false;
+      }
+    }
+  }
+
   async decideNextAction(
     bugDescription: string,
     observation: AgentObservation,
     history: AgentHistory
   ): Promise<AgentResponse> {
-    const prompt = buildPrompt(bugDescription, observation, history);
+    const prompt = buildPrompt(bugDescription, observation, history, this.databaseEnabled, this.databaseContext);
 
     if (this.verbose) {
       console.log(chalk.gray('\n' + '='.repeat(80)));
@@ -161,6 +204,90 @@ export class BugReproductionAgent {
   ): Promise<boolean> {
     const response = await this.decideNextAction(bugDescription, observation, history);
     return response.status === 'reproduced';
+  }
+
+  async executeAction(action: AgentAction): Promise<any> {
+    if (action.type === 'query_database' && this.mcpClient && action.dbQuery) {
+      if (this.verbose) {
+        console.log(chalk.cyan(`\n📊 Executing database query...`));
+        console.log(chalk.gray(`  Collection: ${action.dbQuery.collection}`));
+        console.log(chalk.gray(`  Operation: ${action.dbQuery.operation}`));
+      }
+
+      try {
+        let result;
+        switch (action.dbQuery.operation) {
+          case 'find':
+            result = await this.mcpClient.query(
+              action.dbQuery.collection,
+              action.dbQuery.query,
+              action.dbQuery.options
+            );
+            break;
+          case 'findOne':
+            result = await this.mcpClient.findOne(
+              action.dbQuery.collection,
+              action.dbQuery.query
+            );
+            break;
+          case 'aggregate':
+            result = await this.mcpClient.aggregate(
+              action.dbQuery.collection,
+              action.dbQuery.pipeline || []
+            );
+            break;
+          case 'getSchema':
+            result = await this.mcpClient.getSchema(action.dbQuery.collection);
+            break;
+          case 'listCollections':
+            result = await this.mcpClient.listCollections();
+            break;
+          default:
+            throw new Error(`Unknown database operation: ${action.dbQuery.operation}`);
+        }
+
+        if (this.verbose) {
+          console.log(chalk.green(`✓ Database query completed`));
+          if (result.success) {
+            console.log(chalk.gray(`  Result: ${JSON.stringify(result.data).substring(0, 200)}...`));
+          } else {
+            console.log(chalk.red(`  Error: ${result.error}`));
+          }
+        }
+
+        // Store result in context for next iteration
+        this.databaseContext.lastQueryResult = result.data;
+        
+        return result;
+      } catch (error: any) {
+        if (this.verbose) {
+          console.error(chalk.red(`❌ Database query failed: ${error.message}`));
+        }
+        return {
+          success: false,
+          error: error.message
+        };
+      }
+    }
+    
+    throw new Error('Database query action requires MCP client and dbQuery parameters');
+  }
+
+  async cleanup(): Promise<void> {
+    if (this.mcpClient) {
+      await this.mcpClient.disconnect();
+      if (this.verbose) {
+        console.log(chalk.gray('MongoDB MCP client disconnected'));
+      }
+    }
+  }
+
+  isDatabaseEnabled(): boolean {
+    return this.databaseEnabled && !!this.mcpClient?.isConnected();
+  }
+
+  getDatabaseContext(): DatabaseContext {
+    return this.databaseContext;
   }
 }
 

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "mongodb": {
+      "command": "npx",
+      "args": ["-y", "mongodb-mcp-server"],
+      "env": {
+        "MDB_MCP_CONNECTION_STRING": "${MONGODB_CONNECTION_STRING}",
+        "MDB_MCP_LOG_PATH": "./logs/mcp"
+      }
+    }
+  }
+}
+
+

@@ -9,11 +9,16 @@
     "build": "npm run build --workspaces",
     "dev": "npm run dev --workspaces",
     "bugbot": "npm run build && node packages/api/dist/cli.js",
-    "bugbot:dev": "tsx --tsconfig packages/api/tsconfig.json packages/api/src/cli.ts"
+    "bugbot:dev": "tsx --tsconfig packages/api/tsconfig.json packages/api/src/cli.ts",
+    "webhook": "cd packages/webhook && npm run dev",
+    "webhook:build": "cd packages/webhook && npm run build",
+    "webhook:start": "cd packages/webhook && npm run start"
   },
   "devDependencies": {
-    "typescript": "^5.3.3",
-    "@types/node": "^20.10.6"
+    "@types/node": "^20.10.6",
+    "typescript": "^5.3.3"
+  },
+  "dependencies": {
+    "@daytonaio/sdk": "^0.117.0"
   }
 }
-

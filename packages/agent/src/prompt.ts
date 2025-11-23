@@ -1,9 +1,11 @@
-import { AgentObservation, AgentAction, AgentHistory } from './types';
+import { AgentObservation, AgentAction, AgentHistory, DatabaseContext } from './types';
 
 export function buildPrompt(
   bugDescription: string,
   currentObservation: AgentObservation,
-  history: AgentHistory
+  history: AgentHistory,
+  databaseEnabled: boolean = false,
+  databaseContext?: DatabaseContext
 ): string {
   const clickableElements = currentObservation.dom
     .filter(el => el.clickable)
@@ -20,6 +22,25 @@ export function buildPrompt(
     ? `\nConsole Errors:\n${currentObservation.state.consoleErrors.slice(-5).map((e: string) => `- ${e}`).join('\n')}`
     : '\nConsole Errors: None';
 
+  // Database information
+  let databaseInfo = '';
+  if (databaseEnabled && databaseContext) {
+    databaseInfo = `\n\nDatabase Query Capability: ENABLED
+Available Collections: ${databaseContext.collections?.join(', ') || 'None'}`;
+    
+    if (databaseContext.lastQueryResult) {
+      databaseInfo += `\n\nPrevious Database Query Result:
+${JSON.stringify(databaseContext.lastQueryResult, null, 2).substring(0, 500)}...`;
+    }
+  }
+
+  // Database query result from current observation
+  let dbQueryResultInfo = '';
+  if (currentObservation.dbQueryResult) {
+    dbQueryResultInfo = `\n\nDatabase Query Result from Previous Step:
+${JSON.stringify(currentObservation.dbQueryResult, null, 2).substring(0, 500)}...`;
+  }
+
   return `You are a UI testing agent. Your goal is to reproduce the following bug:
 
 BUG DESCRIPTION: ${bugDescription}
@@ -35,7 +56,7 @@ ${clickableElements || '(none found)'}
 Recent Actions Taken:
 ${recentActions || 'None yet'}
 
-${consoleErrors}
+${consoleErrors}${databaseInfo}${dbQueryResultInfo}
 
 Your task:
 1. Analyze the current state and available elements
@@ -46,17 +67,25 @@ Available Actions:
 - click: Click on an element (use selector from available elements)
 - input: Type text into an input field (requires selector and text)
 - wait: Wait for something to load (use sparingly)
-- navigate: Navigate to a different URL (requires url)
+- navigate: Navigate to a different URL (requires url)${databaseEnabled ? `
+- query_database: Query the database to inspect data state (useful for debugging data-related bugs)` : ''}
 
 Response Format (JSON only, no markdown):
 {
   "thought": "Analysis of current state. If you have performed the action and the observed behavior matches the bug description (e.g., error appeared, nothing happened, wrong state), set status to 'reproduced'.",
   "action": {
-    "type": "click" | "input" | "wait" | "navigate",
+    "type": "click|input|wait|navigate${databaseEnabled ? '|query_database' : ''}",
     "selector": "selector from available elements",
     "target": "human-readable description of target",
     "text": "text to input (only for input action)",
-    "url": "url to navigate to (only for navigate action)"
+    "url": "url to navigate to (only for navigate action)"${databaseEnabled ? `,
+    "dbQuery": {
+      "collection": "collection name",
+      "operation": "find|findOne|aggregate|getSchema|listCollections",
+      "query": {/* MongoDB query object */},
+      "pipeline": [/* aggregation pipeline for aggregate operation */],
+      "options": {/* query options like limit, sort, etc */}
+    } // only for query_database action` : ''}
   },
   "status": "in_progress" | "reproduced" | "failed",
   "reason": "REQUIRED if status is reproduced: Explain exactly what happened and how it matches the bug description"

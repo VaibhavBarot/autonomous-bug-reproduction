@@ -139,7 +139,7 @@ export class Orchestrator {
         startTime,
         endTime: new Date(),
         status,
-        steps: result.executionResults.map(step => ({
+        steps: result.executionResults.map((step: any) => ({
             stepNumber: step.stepNumber,
             action: {
                 type: 'wait', // Placeholder type as we are abstracting actions
