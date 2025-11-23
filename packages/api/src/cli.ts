@@ -50,20 +50,30 @@ program
 
       if (portInUse) {
         console.log(chalk.yellow(`Port ${port} is in use. Attempting to use existing server...`));
-        // Try one more time with a longer timeout
-        try {
-          await axios.get(`${runnerUrl}/health`, { timeout: 5000 });
-          console.log(chalk.green('✓ Connected to existing server'));
-          serverNeedsStart = false;
-        } catch (e) {
+        // Try multiple times with exponential backoff to connect
+        let connected = false;
+        for (let i = 0; i < 3; i++) {
+            try {
+                await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+                await axios.get(`${runnerUrl}/health`, { timeout: 5000 });
+                console.log(chalk.green('✓ Connected to existing server'));
+                connected = true;
+                serverNeedsStart = false;
+                break;
+            } catch (e) {
+                // continue
+            }
+        }
+
+        if (!connected) {
           // Try to find and kill the process
           const { execSync } = require('child_process');
           try {
             const pid = execSync(`lsof -ti:${port}`, { encoding: 'utf-8' }).trim();
             if (pid) {
-              console.log(chalk.yellow(`Found process ${pid} using port ${port}. Killing it...`));
+              console.log(chalk.yellow(`Found unresponsive process ${pid} using port ${port}. Killing it...`));
               execSync(`kill -9 ${pid}`);
-              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for port to free
+              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for port to free
               serverNeedsStart = true;
             }
           } catch (killError: any) {
@@ -71,7 +81,8 @@ program
             console.log(chalk.yellow(`Please kill the process manually or use a different port:`));
             console.log(chalk.gray(`  lsof -ti:${port} | xargs kill -9`));
             console.log(chalk.gray(`  Or use: --runner-url http://localhost:3002`));
-            throw new Error(`Port ${port} is in use and server is not responding`);
+            // Try to start anyway, maybe it freed up
+            serverNeedsStart = true; 
           }
         }
       } else {
@@ -209,6 +220,16 @@ program
       verbose: options.verbose || false
     }, runId);
 
+    // Global error handler for the CLI process to catch unhandled promise rejections (like Axios errors)
+    process.on('unhandledRejection', (reason: any, promise) => {
+        if (reason.code === 'ECONNRESET') {
+            // Ignore ECONNRESET during shutdown or flaky connection, as we might have already finished or will retry
+            if (options.verbose) console.error(chalk.yellow('Warning: Connection reset (ECONNRESET).'));
+        } else {
+            console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        }
+    });
+
     try {
       console.log(chalk.cyan('Initializing browser...'));
       await orchestrator.initialize();
@@ -235,10 +256,13 @@ program
         console.log(chalk.red('❌ Bug reproduction failed.'));
       }
     } catch (error: any) {
-      console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
+      if (error.code === 'ECONNRESET') {
+          console.error(chalk.red(`\n❌ Connection to runner server lost. Please try again.\n`));
+      } else {
+          console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
+      }
       process.exit(1);
     }
   });
 
 program.parse();
-
