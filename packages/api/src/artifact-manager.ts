@@ -14,8 +14,11 @@ export class ArtifactManager {
   private runDir: string;
 
   constructor(runId: string) {
+    // Find project root by going up from this file's location
+    // This file is in packages/api/src/, so go up 3 levels to get project root
+    const projectRoot = path.resolve(__dirname, '../../..');
     // Runs are stored in packages/runner/runs/ to be consistent with runner package
-    this.runDir = path.join(process.cwd(), 'packages', 'runner', 'runs', runId);
+    this.runDir = path.join(projectRoot, 'packages', 'runner', 'runs', runId);
   }
 
   async initialize(): Promise<ArtifactPaths> {

@@ -310,7 +310,9 @@ program
       console.log(chalk.white(`Steps: ${report.steps.length}`));
       console.log(chalk.white(`Duration: ${Math.round((report.endTime.getTime() - report.startTime.getTime()) / 1000)}s\n`));
 
-      const reportPath = path.join(process.cwd(), 'packages', 'runner', 'runs', runId, 'report.html');
+      // Find project root by going up from this file's location
+      const projectRoot = path.resolve(__dirname, '../../..');
+      const reportPath = path.join(projectRoot, 'packages', 'runner', 'runs', runId, 'report.html');
       console.log(chalk.blue(`📊 Report: ${reportPath}\n`));
 
       if (report.status === 'reproduced') {
@@ -358,14 +360,17 @@ program
       runId = runId.substring(4);
     }
 
+    // Find project root by going up from this file's location
+    const projectRoot = path.resolve(__dirname, '../../..');
+    
     // Validate run directory exists
     // Runs are stored in packages/runner/runs/
-    const runDir = path.join(process.cwd(), 'packages', 'runner', 'runs', runId);
+    const runDir = path.join(projectRoot, 'packages', 'runner', 'runs', runId);
     if (!await fs.pathExists(runDir)) {
       console.error(chalk.red(`\n❌ Error: Run directory not found: ${runDir}\n`));
       console.error(chalk.yellow(`Available runs:`));
 
-      const runsDir = path.join(process.cwd(), 'packages', 'runner', 'runs');
+      const runsDir = path.join(projectRoot, 'packages', 'runner', 'runs');
       if (await fs.pathExists(runsDir)) {
         const runs = await fs.readdir(runsDir);
         // Filter out non-directory files and the videos folder

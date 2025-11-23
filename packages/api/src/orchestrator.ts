@@ -2,6 +2,7 @@ import axios from 'axios';
 import { AgentWorkflow, LLMProvider } from '@bugbot/agent';
 import { ArtifactManager } from './artifact-manager';
 import { ReportGenerator, ReportData } from './report-generator';
+import { DiagramGenerator } from './diagram-generator';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import chalk from 'chalk';
@@ -21,10 +22,10 @@ if (process.env.DEBUG_API || process.env.VERBOSE) {
 
   axios.interceptors.response.use(
     (response) => {
-      const dataPreview = typeof response.data === 'object' 
+      const dataPreview = typeof response.data === 'object'
         ? JSON.stringify(response.data).substring(0, 200)
         : String(response.data).substring(0, 200);
-      
+
       console.log(chalk.green(`📥 API RESPONSE: ${response.status} ${response.config.method?.toUpperCase()} ${response.config.url}`));
       return response;
     },
@@ -58,7 +59,7 @@ export class Orchestrator {
   constructor(config: OrchestratorConfig, runId: string) {
     this.config = config;
     this.runId = runId;
-    
+
     let modelName = 'gpt-4-turbo-preview';
     let baseUrl: string | undefined = undefined;
 
@@ -68,10 +69,10 @@ export class Orchestrator {
     }
 
     this.workflow = new AgentWorkflow(
-        config.runnerUrl, 
-        modelName, 
-        config.apiKey,
-        baseUrl
+      config.runnerUrl,
+      modelName,
+      config.apiKey,
+      baseUrl
     );
     this.artifactManager = new ArtifactManager(runId);
   }
@@ -98,7 +99,7 @@ export class Orchestrator {
         stagehandApiKey: stagehandApiKey,
         stagehandModelProvider: stagehandModelProvider
       });
-      
+
       if (!response.data.success) {
         throw new Error('Browser initialization failed');
       }
@@ -124,22 +125,22 @@ export class Orchestrator {
     try {
       // Run the workflow
       const result = await this.workflow.run(this.config.bugDescription);
-      
+
       // Determine status from report
       status = result.report.reproduced ? 'reproduced' : 'failed';
 
       // Capture final artifacts
       const artifacts = await this.artifactManager.initialize();
-      
+
       // Stop tracing and get video path
       let videoPath = null;
       try {
-          const stopResponse = await axios.post(`${this.config.runnerUrl}/stop`, {
-            tracingPath: artifacts.tracingPath
-          });
-          videoPath = await this.artifactManager.copyVideo(stopResponse.data.videoPath);
+        const stopResponse = await axios.post(`${this.config.runnerUrl}/stop`, {
+          tracingPath: artifacts.tracingPath
+        });
+        videoPath = await this.artifactManager.copyVideo(stopResponse.data.videoPath);
       } catch (e) {
-          console.warn("Failed to capture video/trace:", e);
+        console.warn("Failed to capture video/trace:", e);
       }
 
       // Save logs
@@ -197,6 +198,18 @@ export class Orchestrator {
         }
       };
 
+      // Generate architectural diagram
+      try {
+        const diagramGenerator = new DiagramGenerator(this.config.apiKey, this.config.provider);
+        const diagram = await diagramGenerator.generateDiagram(reportData.steps);
+        if (diagram) {
+          reportData.diagram = diagram;
+        }
+      } catch (e) {
+        console.warn(chalk.yellow('Failed to generate diagram:'), e);
+      }
+
+
       // Save HTML report
       const htmlReport = ReportGenerator.generateHTML(reportData);
       await fs.writeFile(artifacts.reportPath, htmlReport);
@@ -209,14 +222,14 @@ export class Orchestrator {
       );
 
       // Close browser
-      await axios.post(`${this.config.runnerUrl}/close`).catch(() => {});
+      await axios.post(`${this.config.runnerUrl}/close`).catch(() => { });
 
       return reportData;
 
     } catch (error: any) {
       console.error(`Orchestrator error: ${error.message}`);
       // Close browser just in case
-      await axios.post(`${this.config.runnerUrl}/close`).catch(() => {});
+      await axios.post(`${this.config.runnerUrl}/close`).catch(() => { });
       throw error;
     }
   }
