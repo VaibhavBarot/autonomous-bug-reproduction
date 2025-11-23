@@ -9,6 +9,11 @@ import {
   GetNetworkTool,
   GetBackendLogsTool
 } from "./tools/playwright-tools";
+import {
+  StagehandActTool,
+  StagehandExtractTool,
+  StagehandObserveTool
+} from "./tools/stagehand-tools";
 import { TestPlan } from "./planner-agent";
 import { AgentObservation } from "./types";
 
@@ -51,6 +56,13 @@ export class ExecutorAgent {
         const networkTool = new GetNetworkTool(this.runnerUrl);
         const backendLogsTool = new GetBackendLogsTool(this.runnerUrl);
         const navigateTool = new NavigateTool(this.runnerUrl);
+        
+        // Stagehand tools for smarter actions (preferred)
+        const stagehandActTool = new StagehandActTool(this.runnerUrl);
+        const stagehandExtractTool = new StagehandExtractTool(this.runnerUrl);
+        const stagehandObserveTool = new StagehandObserveTool(this.runnerUrl);
+        
+        // Legacy tools (fallback if Stagehand not available)
         const clickTool = new ClickTool(this.runnerUrl);
         const inputTool = new InputTool(this.runnerUrl);
 
@@ -58,6 +70,23 @@ export class ExecutorAgent {
         const currentDOMStr = await domTool._call({});
         const currentStateStr = await stateTool._call({});
         const currentNetworkStr = await networkTool._call({});
+        
+        // Try to get Stagehand observations (available actions on the page)
+        let observationsStr = "";
+        let stagehandAvailable = false;
+        try {
+          const obsResult = await stagehandObserveTool._call({});
+          // Check if we got actual observations or an error message
+          if (!obsResult.includes("not available") && !obsResult.includes("Failed") && !obsResult.includes("Cannot use")) {
+            observationsStr = obsResult;
+            stagehandAvailable = true;
+          } else {
+            observationsStr = "Stagehand not available - use legacy tools (click, input, get_dom)";
+          }
+        } catch (e) {
+          // Stagehand might not be initialized, that's okay
+          observationsStr = "Stagehand not available - use legacy tools (click, input, get_dom)";
+        }
 
         let currentDOM: any[] = [];
         let currentState: any = { url: "", title: "", consoleErrors: [] };
@@ -104,19 +133,39 @@ ${currentStateStr}
 Recent network activity (may be truncated by the server, but include as much as available):
 ${currentNetworkStr}
 
-Choose ONE best tool to move this step forward:
-- "navigate" with args { "url": "<url>" }
-- "click" with args { "selector": "<locator or visible text>" }
-- "input" with args { "selector": "<input selector>", "text": "<text to type>" }
-- "get_backend_logs" with args {} to inspect recent backend logs
-- "noop" if no action is needed (verification only).
+Available actions on the page (from Stagehand observe - use this to understand what's possible):
+${observationsStr}
 
-You are also provided a screenshot of the current page as an image. Use the screenshot to visually locate product names (e.g. "Product 2") and match them to their corresponding "Add to Cart" buttons when choosing selectors.
+Choose ONE best tool to move this step forward.
+
+${stagehandAvailable ? `**Stagehand Tools (AVAILABLE - use these for smarter actions):**
+- "stagehand_act" with args { "instruction": "<natural language action>" }
+- "stagehand_extract" with args { "instruction": "<what to extract>" }
+- "stagehand_observe" with args {} to refresh observations
+
+**Legacy Tools (fallback if Stagehand unavailable):**
+- "navigate" with args { "url": "<url>" }
+- "click" with args { "selector": "<locator or text>" }
+- "input" with args { "selector": "<input selector>", "text": "<text>" }
+- "get_backend_logs" with args {}
+- "noop" if no action needed` : `**IMPORTANT: Stagehand is NOT available. You MUST use legacy tools:**
+- "navigate" with args { "url": "<url>" } - for navigation
+- "click" with args { "selector": "<locator or visible text>" } - for clicking elements
+  Example selectors: "Add to Cart", "button:text('Add to Cart')", "#cart-button"
+- "input" with args { "selector": "<input selector>", "text": "<text>" } - for typing
+- "get_dom" - to see page elements (already provided above in currentDOMStr)
+- "get_backend_logs" with args {} - to inspect backend logs
+- "noop" if no action needed
+
+**Decision Guidelines:**
+- Use "click" with text-based selectors like "Add to Cart" or button text
+- Use "get_dom" data (already provided) to find the right selectors
+- Parse the DOM to extract data instead of using stagehand_extract`}
 
 Return ONLY valid JSON in this exact format (no extra commentary before or after, no markdown):
 {
   "thought": "reason about what to do",
-  "tool": "navigate" | "click" | "input" | "get_backend_logs" | "noop",
+  "tool": "stagehand_act" | "stagehand_extract" | "stagehand_observe" | "navigate" | "click" | "input" | "get_backend_logs" | "noop",
   "args": { ... appropriate args ... }
 }`;
 
@@ -162,7 +211,16 @@ Return ONLY valid JSON in this exact format (no extra commentary before or after
         let toolObservation = "";
 
         try {
-          if (toolName === "navigate") {
+          if (toolName === "stagehand_act") {
+            toolObservation = await stagehandActTool._call({ instruction: args.instruction });
+          } else if (toolName === "stagehand_extract") {
+            toolObservation = await stagehandExtractTool._call({ 
+              instruction: args.instruction,
+              schema: args.schema
+            });
+          } else if (toolName === "stagehand_observe") {
+            toolObservation = await stagehandObserveTool._call({});
+          } else if (toolName === "navigate") {
             toolObservation = await navigateTool._call({ url: args.url });
           } else if (toolName === "click") {
             toolObservation = await clickTool._call({ selector: args.selector });

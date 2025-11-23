@@ -93,9 +93,9 @@ app.get('/health', (req, res) => {
 // Initialize browser
 app.post('/init', async (req, res) => {
   try {
-    const { headless = false } = req.body;
+    const { headless = false, stagehandApiKey, stagehandModelProvider } = req.body;
     console.error(`[Server] Initializing browser (headless: ${headless})...`);
-    await controller.initialize(headless);
+    await controller.initialize(headless, stagehandApiKey, stagehandModelProvider);
     isInitialized = true;
     console.error(`[Server] Browser initialized successfully`);
     res.json({ success: true });
@@ -219,6 +219,89 @@ app.post('/stop', async (req, res) => {
     res.json({ success: true, videoPath });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Stagehand act (natural language action)
+app.post('/action/act', async (req, res) => {
+  try {
+    if (!isInitialized) {
+      return res.status(400).json({ error: 'Browser not initialized. Call /init first.' });
+    }
+    const { instruction }: { instruction: string } = req.body;
+    if (!instruction) {
+      return res.status(400).json({ error: 'instruction is required' });
+    }
+    console.error(`[Server] /action/act received instruction: "${instruction}"`);
+    try {
+      const result = await controller.act(instruction);
+      res.json({ success: true, result });
+    } catch (stagehandError: any) {
+      // If Stagehand fails, return error but don't crash
+      // The agent can fall back to legacy tools
+      console.error(`[Server] Stagehand act() failed, agent should use legacy tools:`, stagehandError.message);
+      res.status(500).json({ 
+        error: `Stagehand not available: ${stagehandError.message}. Please use legacy click/input tools instead.`,
+        stagehandError: true
+      });
+    }
+  } catch (error: any) {
+    console.error(`[Server] /action/act error:`, error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// Stagehand extract (natural language extraction)
+app.post('/extract', async (req, res) => {
+  try {
+    if (!isInitialized) {
+      return res.status(400).json({ error: 'Browser not initialized. Call /init first.' });
+    }
+    const { instruction, schema }: { instruction: string; schema?: any } = req.body;
+    if (!instruction) {
+      return res.status(400).json({ error: 'instruction is required' });
+    }
+    console.error(`[Server] /extract received instruction: "${instruction}"`);
+    try {
+      const result = await controller.extract(instruction, schema);
+      res.json({ success: true, data: result });
+    } catch (stagehandError: any) {
+      console.error(`[Server] Stagehand extract() failed, agent should use legacy tools:`, stagehandError.message);
+      res.status(500).json({ 
+        error: `Stagehand not available: ${stagehandError.message}. Please use legacy DOM parsing instead.`,
+        stagehandError: true
+      });
+    }
+  } catch (error: any) {
+    console.error(`[Server] /extract error:`, error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// Stagehand observe (get available actions)
+app.get('/observe', async (req, res) => {
+  try {
+    if (!isInitialized) {
+      return res.status(400).json({ error: 'Browser not initialized. Call /init first.' });
+    }
+    try {
+      const observations = await controller.observe();
+      res.json({ success: true, observations });
+    } catch (stagehandError: any) {
+      // If observe fails, return empty observations so agent can continue
+      console.error(`[Server] Stagehand observe() failed, returning empty observations:`, stagehandError.message);
+      res.json({ success: true, observations: [] });
+    }
+  } catch (error: any) {
+    console.error(`[Server] /observe error:`, error);
+    // Don't fail completely - return empty observations
+    res.json({ success: true, observations: [] });
   }
 });
 

@@ -8,6 +8,7 @@
     "dev": "tsx src/server.ts"
   },
   "dependencies": {
+    "@browserbasehq/stagehand": "^3.0.0",
     "chrome-remote-interface": "^0.33.3",
     "cors": "^2.8.5",
     "express": "^4.18.2",
