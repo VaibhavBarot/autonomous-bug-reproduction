@@ -43,7 +43,7 @@ export class ReportParser {
    * Parse a bug report markdown file and extract structured data
    */
   static async parse(runId: string): Promise<BugReport> {
-    const reportPath = path.join(process.cwd(), 'runs', runId, 'report.md');
+    const reportPath = path.join(process.cwd(), 'packages', 'runner', 'runs', runId, 'report.md');
     
     if (!await fs.pathExists(reportPath)) {
       throw new Error(`Report file not found: ${reportPath}`);

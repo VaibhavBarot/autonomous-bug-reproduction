@@ -11,6 +11,7 @@
     "dev": "tsx src/cli.ts"
   },
   "dependencies": {
+    "@daytonaio/sdk": "^0.115.0",
     "commander": "^11.1.0",
     "chalk": "^4.1.2",
     "fs-extra": "^11.2.0",

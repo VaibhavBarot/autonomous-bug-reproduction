@@ -14,7 +14,8 @@ export class ArtifactManager {
   private runDir: string;
 
   constructor(runId: string) {
-    this.runDir = path.join(process.cwd(), 'runs', runId);
+    // Runs are stored in packages/runner/runs/ to be consistent with runner package
+    this.runDir = path.join(process.cwd(), 'packages', 'runner', 'runs', runId);
   }
 
   async initialize(): Promise<ArtifactPaths> {

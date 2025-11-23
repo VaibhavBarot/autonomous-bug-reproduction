@@ -8,6 +8,7 @@ import { Orchestrator } from './orchestrator';
 import { FixSuggester } from './fix-suggester';
 import { OutputFormatter } from './output-formatter';
 import { ReportParser } from './report-parser';
+import { startDaytonaSandbox, DaytonaSandboxHandle } from './daytona-sandbox';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 
@@ -30,7 +31,29 @@ program
   .option('--headless', 'Run browser in headless mode', false)
   .option('--api-key <key>', 'API key (or set GEMINI_API_KEY or OPENAI_API_KEY env var)')
   .option('--provider <provider>', 'LLM provider: gemini or openai', 'gemini')
+  .option('--use-stagehand', 'Enable Stagehand for smarter browser actions (default: true when API key provided)', true)
+  .option('--no-use-stagehand', 'Disable Stagehand and use legacy tools only')
   .option('--verbose', 'Show detailed LLM and interaction logs', false)
+  .option('--daytona', 'Run the target app inside a Daytona sandbox environment', false)
+  .option('--daytona-repo <url>', 'Git repository URL for the app to run in Daytona')
+  .option('--daytona-branch <branch>', 'Git branch to check out in the Daytona sandbox', 'main')
+  .option(
+    '--daytona-project-path <path>',
+    'Optional path inside the repo where the web app lives (e.g. test-app/frontend)'
+  )
+  .option(
+    '--daytona-port <port>',
+    'Port the app listens on inside the Daytona sandbox (used for preview URL)',
+    '3000'
+  )
+  .option(
+    '--daytona-install-command <cmd>',
+    'Install command to run in Daytona (default: npm install)'
+  )
+  .option(
+    '--daytona-start-command <cmd>',
+    'Start command to run in Daytona (default: npm start)'
+  )
   .action(async (bugDescription, options) => {
     console.log(chalk.blue.bold('\n🤖 BugBot - Autonomous Bug Reproduction System\n'));
 
@@ -38,7 +61,9 @@ program
     const runnerUrl = options.runnerUrl || 'http://localhost:3001';
     const port = parseInt(new URL(runnerUrl).port) || 3001;
     let serverNeedsStart = false;
-
+    let targetUrl: string = options.url || 'http://localhost:3000';
+    let daytonaHandle: DaytonaSandboxHandle | null = null;
+    
     try {
       await axios.get(`${runnerUrl}/health`, { timeout: 2000 });
       console.log(chalk.green('✓ Runner server already running'));
@@ -58,20 +83,30 @@ program
 
       if (portInUse) {
         console.log(chalk.yellow(`Port ${port} is in use. Attempting to use existing server...`));
-        // Try one more time with a longer timeout
-        try {
-          await axios.get(`${runnerUrl}/health`, { timeout: 5000 });
-          console.log(chalk.green('✓ Connected to existing server'));
-          serverNeedsStart = false;
-        } catch (e) {
+        // Try multiple times with exponential backoff to connect
+        let connected = false;
+        for (let i = 0; i < 3; i++) {
+            try {
+                await new Promise(resolve => setTimeout(resolve, 1000 * (i + 1)));
+                await axios.get(`${runnerUrl}/health`, { timeout: 5000 });
+                console.log(chalk.green('✓ Connected to existing server'));
+                connected = true;
+                serverNeedsStart = false;
+                break;
+            } catch (e) {
+                // continue
+            }
+        }
+
+        if (!connected) {
           // Try to find and kill the process
           const { execSync } = require('child_process');
           try {
             const pid = execSync(`lsof -ti:${port}`, { encoding: 'utf-8' }).trim();
             if (pid) {
-              console.log(chalk.yellow(`Found process ${pid} using port ${port}. Killing it...`));
+              console.log(chalk.yellow(`Found unresponsive process ${pid} using port ${port}. Killing it...`));
               execSync(`kill -9 ${pid}`);
-              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for port to free
+              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait for port to free
               serverNeedsStart = true;
             }
           } catch (killError: any) {
@@ -79,7 +114,8 @@ program
             console.log(chalk.yellow(`Please kill the process manually or use a different port:`));
             console.log(chalk.gray(`  lsof -ti:${port} | xargs kill -9`));
             console.log(chalk.gray(`  Or use: --runner-url http://localhost:3002`));
-            throw new Error(`Port ${port} is in use and server is not responding`);
+            // Try to start anyway, maybe it freed up
+            serverNeedsStart = true; 
           }
         }
       } else {
@@ -181,7 +217,7 @@ program
       runnerProcess.unref();
     }
 
-    const runId = `run-${Date.now()}`;
+    const runId = Date.now().toString();
     console.log(chalk.gray(`Run ID: ${runId}\n`));
 
     // Determine provider and API key
@@ -205,23 +241,65 @@ program
       process.exit(1);
     }
 
-    const orchestrator = new Orchestrator({
-      runnerUrl,
-      targetUrl: options.url,
-      bugDescription,
-      maxSteps: parseInt(options.maxSteps),
-      timeout: parseInt(options.timeout) * 1000,
-      apiKey,
-      provider,
-      headless: options.headless,
-      verbose: options.verbose || false
-    }, runId);
+    // If requested, spin up a Daytona sandbox and point BugBot at its preview URL
+    if (options.daytona) {
+      if (!options.daytonaRepo) {
+        console.error(
+          chalk.red(
+            '\n❌ Daytona sandbox mode requires --daytona-repo <git-url> so the app can be cloned into the sandbox.\n'
+          )
+        );
+        process.exit(1);
+      }
+
+      const daytonaPort = parseInt(options.daytonaPort || '3000', 10);
+
+      console.log(chalk.cyan('\n🌊 Starting Daytona sandbox for target app...\n'));
+      daytonaHandle = await startDaytonaSandbox({
+        repoUrl: options.daytonaRepo,
+        branch: options.daytonaBranch,
+        projectPath: options.daytonaProjectPath,
+        port: daytonaPort,
+        installCommand: options.daytonaInstallCommand,
+        startCommand: options.daytonaStartCommand,
+      });
+
+      targetUrl = daytonaHandle.appUrl;
+      console.log(chalk.green(`Using Daytona sandbox app URL as target: ${targetUrl}\n`));
+    }
+
+    const orchestrator = new Orchestrator(
+      {
+        runnerUrl,
+        targetUrl,
+        bugDescription,
+        maxSteps: parseInt(options.maxSteps),
+        timeout: parseInt(options.timeout) * 1000,
+        apiKey,
+        provider,
+        headless: options.headless,
+        verbose: options.verbose || false,
+        useStagehand: options.useStagehand !== false, // Enable by default if API key provided
+      },
+      runId
+    );
+
+    // Global error handler for the CLI process to catch unhandled promise rejections (like Axios errors)
+    process.on('unhandledRejection', (reason: any, promise) => {
+        if (reason.code === 'ECONNRESET') {
+            // Ignore ECONNRESET during shutdown or flaky connection, as we might have already finished or will retry
+            if (options.verbose) console.error(chalk.yellow('Warning: Connection reset (ECONNRESET).'));
+        } else {
+            console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+        }
+    });
 
     try {
       console.log(chalk.cyan('Initializing browser...'));
       await orchestrator.initialize();
 
       console.log(chalk.cyan(`Navigating to ${options.url}...`));
+      console.log(chalk.cyan(`Navigating to ${targetUrl}...`));
       console.log(chalk.cyan(`Bug: ${bugDescription}\n`));
       console.log(chalk.yellow('Starting autonomous exploration...\n'));
 
@@ -232,7 +310,7 @@ program
       console.log(chalk.white(`Steps: ${report.steps.length}`));
       console.log(chalk.white(`Duration: ${Math.round((report.endTime.getTime() - report.startTime.getTime()) / 1000)}s\n`));
 
-      const reportPath = path.join(process.cwd(), 'runs', runId, 'report.html');
+      const reportPath = path.join(process.cwd(), 'packages', 'runner', 'runs', runId, 'report.html');
       console.log(chalk.blue(`📊 Report: ${reportPath}\n`));
 
       if (report.status === 'reproduced') {
@@ -243,8 +321,23 @@ program
         console.log(chalk.red('❌ Bug reproduction failed.'));
       }
     } catch (error: any) {
-      console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
+      if (error.code === 'ECONNRESET') {
+          console.error(chalk.red(`\n❌ Connection to runner server lost. Please try again.\n`));
+      } else {
+          console.error(chalk.red(`\n❌ Error: ${error.message}\n`));
+      }
+      if (daytonaHandle) {
+        await daytonaHandle.stop().catch(() => {
+          // ignore
+        });
+      }
       process.exit(1);
+    } finally {
+      if (daytonaHandle) {
+        await daytonaHandle.stop().catch(() => {
+          // ignore
+        });
+      }
     }
   });
 
@@ -252,7 +345,7 @@ program
 program
   .command('suggest-fix')
   .description('Suggest code fixes for a bug reproduction report')
-  .argument('<run-id>', 'Run ID from bug reproduction (e.g., run-1234567890)')
+  .argument('<run-id>', 'Run ID from bug reproduction (e.g., 1763908658341)')
   .option('--api-key <key>', 'Gemini API key (or set GEMINI_API_KEY env var)')
   .option('--codebase-path <path>', 'Path to codebase to analyze', 'test-app')
   .option('--model <model>', 'Gemini model to use', 'gemini-2.5-pro')
@@ -260,18 +353,33 @@ program
   .action(async (runId, options) => {
     console.log(chalk.blue.bold('\n🔧 BugBot - Fix Suggester\n'));
 
+    // Strip 'run-' prefix if present (for backward compatibility)
+    if (runId.startsWith('run-')) {
+      runId = runId.substring(4);
+    }
+
     // Validate run directory exists
-    const runDir = path.join(process.cwd(), 'runs', runId);
+    // Runs are stored in packages/runner/runs/
+    const runDir = path.join(process.cwd(), 'packages', 'runner', 'runs', runId);
     if (!await fs.pathExists(runDir)) {
       console.error(chalk.red(`\n❌ Error: Run directory not found: ${runDir}\n`));
       console.error(chalk.yellow(`Available runs:`));
 
-      const runsDir = path.join(process.cwd(), 'runs');
+      const runsDir = path.join(process.cwd(), 'packages', 'runner', 'runs');
       if (await fs.pathExists(runsDir)) {
         const runs = await fs.readdir(runsDir);
-        const runDirs = runs.filter(r => r.startsWith('run-'));
+        // Filter out non-directory files and the videos folder
+        const runDirs = [];
+        for (const r of runs) {
+          if (r === 'videos' || r.startsWith('.')) continue;
+          const fullPath = path.join(runsDir, r);
+          const stats = await fs.stat(fullPath);
+          if (stats.isDirectory()) {
+            runDirs.push(r);
+          }
+        }
         if (runDirs.length > 0) {
-          runDirs.sort().reverse().slice(0, 5).forEach(run => {
+          runDirs.sort().reverse().slice(0, 10).forEach(run => {
             console.error(chalk.gray(`  • ${run}`));
           });
         } else {
@@ -336,7 +444,7 @@ program
       console.log(chalk.white(`1. Review the suggested fixes in ${chalk.cyan('fix-analysis.md')}`));
       console.log(chalk.white(`2. Apply the diff using:`));
       console.log(chalk.gray(`   cd ${options.codebasePath}`));
-      console.log(chalk.gray(`   git apply ../runs/${runId}/suggested-fixes.diff`));
+      console.log(chalk.gray(`   git apply ../packages/runner/runs/${runId}/suggested-fixes.diff`));
       console.log(chalk.white(`3. Test your application to verify the fix\n`));
 
     } catch (error: any) {
@@ -349,4 +457,3 @@ program
   });
 
 program.parse();
-

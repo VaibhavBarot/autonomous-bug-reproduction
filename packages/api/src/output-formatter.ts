@@ -127,12 +127,12 @@ ${suggestion.analysis}
         markdown += `Save the \`suggested-fixes.diff\` file and apply it:\n\n`;
         markdown += `\`\`\`bash\n`;
         markdown += `cd test-app  # or your codebase directory\n`;
-        markdown += `git apply ../runs/${runId}/suggested-fixes.diff\n`;
+        markdown += `git apply ../packages/runner/runs/${runId}/suggested-fixes.diff\n`;
         markdown += `\`\`\`\n\n`;
         markdown += `### Option 3: Using patch\n\n`;
         markdown += `\`\`\`bash\n`;
         markdown += `cd test-app\n`;
-        markdown += `patch -p1 < ../runs/${runId}/suggested-fixes.diff\n`;
+        markdown += `patch -p1 < ../packages/runner/runs/${runId}/suggested-fixes.diff\n`;
         markdown += `\`\`\`\n\n`;
 
         markdown += `---\n\n## Verification\n\n`;
