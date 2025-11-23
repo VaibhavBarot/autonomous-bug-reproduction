@@ -81,12 +81,13 @@ Each Step Block includes:
   • 🌐 URL capsule (if provided)
 
 3. STYLE REQUIREMENTS
-- Use soft rounded rectangles and pastel color palette.  
-- Subtle borders and soft shadows.  
-- Smooth arrows between components.  
-- Use icons creatively (💭 ⚙️ 🌐).  
-- Keep everything visually balanced and non-cluttered.  
-- Maintain consistent width and spacing.
+- Use soft rounded rectangles.
+- **Apply light, soft pastel gradient backgrounds to each step block.** (e.g., linear-gradient(135deg, #e0f2fe 0%, #f0f9ff 100%) for blue, etc.)
+- Vary the gradient colors slightly between steps (e.g., Blue -> Green -> Yellow -> Orange) to visually distinguish them, similar to the provided reference.
+- Subtle borders and soft shadows.
+- Smooth arrows between components.
+- Use icons creatively (💭 ⚙️ 🌐).
+- Keep everything visually balanced and non-cluttered.
 - **CRITICAL**: The output MUST be valid HTML/CSS that can be embedded directly into a div. Use inline styles or a <style> block scoped to the diagram container. Do NOT use external CSS files.
 - **CRITICAL**: The diagram should fit within a width of roughly 400-500px, but be responsive if possible.
 
