@@ -33,3 +33,12 @@ export interface InputAction {
   text: string;
 }
 
+export interface StagehandActAction {
+  instruction: string;  // Natural language instruction like "click the Add to Cart button"
+}
+
+export interface StagehandExtractAction {
+  instruction: string;  // Natural language extraction like "get the price of the first product"
+  schema?: any;  // Optional schema for structured extraction
+}
+

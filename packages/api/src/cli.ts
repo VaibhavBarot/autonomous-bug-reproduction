@@ -23,6 +23,8 @@ program
   .option('--headless', 'Run browser in headless mode', false)
   .option('--api-key <key>', 'API key (or set GEMINI_API_KEY or OPENAI_API_KEY env var)')
   .option('--provider <provider>', 'LLM provider: gemini or openai', 'gemini')
+  .option('--use-stagehand', 'Enable Stagehand for smarter browser actions (default: true when API key provided)', true)
+  .option('--no-use-stagehand', 'Disable Stagehand and use legacy tools only')
   .option('--verbose', 'Show detailed LLM and interaction logs', false)
   .option('--daytona', 'Run the target app inside a Daytona sandbox environment', false)
   .option('--daytona-repo <url>', 'Git repository URL for the app to run in Daytona')
@@ -269,6 +271,7 @@ program
         provider,
         headless: options.headless,
         verbose: options.verbose || false,
+        useStagehand: options.useStagehand !== false, // Enable by default if API key provided
       },
       runId
     );

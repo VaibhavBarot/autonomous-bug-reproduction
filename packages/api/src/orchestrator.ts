@@ -46,6 +46,8 @@ export interface OrchestratorConfig {
   provider?: LLMProvider;
   headless?: boolean;
   verbose?: boolean;
+  useStagehand?: boolean;  // Enable/disable Stagehand (default: true if apiKey provided)
+  stagehandApiKey?: string;  // Optional separate API key for Stagehand
 }
 
 export class Orchestrator {
@@ -77,15 +79,33 @@ export class Orchestrator {
 
   async initialize(): Promise<void> {
     await this.artifactManager.initialize();
-
-    // Initialize browser
+    
+    // Determine if Stagehand should be used and get API key
+    // Enable Stagehand by default when API key is provided
+    const useStagehand = this.config.useStagehand !== false; // Default to true
+    const stagehandApiKey = this.config.stagehandApiKey || (this.config.apiKey && useStagehand ? this.config.apiKey : undefined);
+    const stagehandModelProvider = this.config.provider || 'gemini';
+    
+    if (useStagehand && stagehandApiKey) {
+      console.log(chalk.cyan('🎭 Stagehand enabled - using AI-powered browser actions'));
+    } else if (!stagehandApiKey) {
+      console.log(chalk.yellow('⚠️  Stagehand disabled - no API key provided (will use legacy tools)'));
+    }
+    
+    // Initialize browser with Stagehand if enabled
     try {
       const response = await axios.post(`${this.config.runnerUrl}/init`, {
-        headless: this.config.headless ?? false
+        headless: this.config.headless ?? false,
+        stagehandApiKey: stagehandApiKey,
+        stagehandModelProvider: stagehandModelProvider
       });
 
       if (!response.data.success) {
         throw new Error('Browser initialization failed');
+      }
+      
+      if (useStagehand && stagehandApiKey) {
+        console.log('Stagehand enabled for smarter browser actions');
       }
     } catch (error: any) {
       const errorMsg = error.response?.data?.error || error.message;
@@ -140,21 +160,36 @@ export class Orchestrator {
         startTime,
         endTime: new Date(),
         status,
-        steps: result.executionResults.map(step => ({
-          stepNumber: step.stepNumber,
-          action: {
-            type: 'wait', // Placeholder type as we are abstracting actions
-            selector: step.description,
-            target: step.description
-          },
-          observation: step.detailedObservation ? step.detailedObservation : {
-            dom: [],
-            state: { url: '', title: '', consoleErrors: [], networkEntries: [], backendLogs: [] },
-            stepNumber: step.stepNumber,
-            screenshot: step.screenshot
-          },
-          thought: step.observation // Use the observation text as "thought" or detailed observation
-        })),
+        steps: result.executionResults.map(step => {
+            // Extract thought from observation string if thought field is not available
+            let thought = step.thought;
+            if (!thought && step.observation) {
+                // Try to extract thought from observation string format: "Thought: ...\nTool: ..."
+                const thoughtMatch = step.observation.match(/Thought:\s*(.+?)(?:\n|$)/);
+                if (thoughtMatch) {
+                    thought = thoughtMatch[1].trim();
+                } else {
+                    // If no match, use the full observation as fallback
+                    thought = step.observation;
+                }
+            }
+            
+            return {
+                stepNumber: step.stepNumber,
+                action: {
+                    type: 'wait', // Placeholder type as we are abstracting actions
+                    selector: step.description,
+                    target: step.description
+                },
+                observation: step.detailedObservation ? step.detailedObservation : {
+                    dom: [],
+                    state: { url: '', title: '', consoleErrors: [], networkEntries: [], backendLogs: [] },
+                    stepNumber: step.stepNumber,
+                    screenshot: step.screenshot
+                },
+                thought: thought
+            };
+        }),
         networkEntries: networkEntries.data,
         consoleErrors: finalState.data.consoleErrors || [],
         artifacts: {
